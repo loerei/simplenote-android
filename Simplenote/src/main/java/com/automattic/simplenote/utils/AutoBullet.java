@@ -16,18 +16,19 @@ public class AutoBullet {
     private static final String STR_SPACE = " ";
 
     public static void apply(Editable editable, int oldCursorPosition, int newCursorPosition) {
-        if (!isValidCursorIncrement(oldCursorPosition, newCursorPosition)) {
+        if (!isValidCursorIncrement(oldCursorPosition, newCursorPosition) || editable == null || newCursorPosition > editable.length()) {
             return;
         }
 
-        String noteContent = editable.toString();
-        String prevChar = noteContent.substring(newCursorPosition - 1, newCursorPosition);
-
-        if (prevChar.equals(STR_LINE_BREAK)) {
+        if (editable.charAt(newCursorPosition - 1) == '\n') {
             int prevParagraphEnd = newCursorPosition - 1;
-            int prevParagraphStart = noteContent.lastIndexOf(STR_LINE_BREAK, prevParagraphEnd - 1);
+            int prevParagraphStart = prevParagraphEnd - 1;
+            while (prevParagraphStart >= 0 && editable.charAt(prevParagraphStart) != '\n') {
+                prevParagraphStart--;
+            }
             prevParagraphStart++; // ++ because we don't actually include the previous linebreak
-            String prevParagraph = noteContent.substring(prevParagraphStart, prevParagraphEnd);
+
+            String prevParagraph = editable.subSequence(prevParagraphStart, prevParagraphEnd).toString();
             BulletMetadata metadata = extractBulletMetadata(prevParagraph);
             // See if there's a CheckableSpan in the previous line
             CheckableSpan[] checkableSpans = editable.getSpans(prevParagraphStart, prevParagraphEnd, CheckableSpan.class);
