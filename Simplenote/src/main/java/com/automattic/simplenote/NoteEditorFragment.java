@@ -1202,7 +1202,6 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
     public void afterTextChanged(Editable editable) {
         attemptAutoList(editable);
         setTitleSpan(editable);
-        mContentEditText.fixLineSpacing();
     }
 
     @Override
@@ -1237,19 +1236,20 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
      * spans are removed when {@link MetricAffectingSpan} is removed.
      */
     private void setTitleSpan(Editable editable) {
-        for (MetricAffectingSpan span : editable.getSpans(0, editable.length(), MetricAffectingSpan.class)) {
-            if (span instanceof RelativeSizeSpan || span instanceof StyleSpan) {
-                editable.removeSpan(span);
-            }
-        }
-
-        int newLinePosition = getNoteContentString().indexOf("\n");
+        int newLinePosition = TextUtils.indexOf(editable, '\n');
 
         if (newLinePosition == 0) {
             return;
         }
 
         int titleEndPosition = (newLinePosition > 0) ? newLinePosition : editable.length();
+
+        for (MetricAffectingSpan span : editable.getSpans(0, Math.min(editable.length(), titleEndPosition + 1), MetricAffectingSpan.class)) {
+            if (span instanceof RelativeSizeSpan || span instanceof StyleSpan) {
+                editable.removeSpan(span);
+            }
+        }
+
         editable.setSpan(new RelativeSizeSpan(1.3f), 0, titleEndPosition, Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
         editable.setSpan(new StyleSpan(Typeface.BOLD), 0, titleEndPosition, Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
     }

@@ -43,12 +43,14 @@ public class ChecklistUtils {
      *
      * @return          {@link Editable} spannable string with checkbox spans.
      */
+    private static final java.util.concurrent.ConcurrentHashMap<String, Pattern> PATTERN_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+
     public static Editable addChecklistSpansForRegexAndColor(Context context, Editable editable, String regex, int color, boolean isList) {
         if (editable == null) {
             return new SpannableStringBuilder("");
         }
 
-        Pattern p = Pattern.compile(regex, Pattern.MULTILINE);
+        Pattern p = PATTERN_CACHE.computeIfAbsent(regex, r -> Pattern.compile(r, Pattern.MULTILINE));
         Matcher m = p.matcher(editable);
         int positionAdjustment = 0;
 

@@ -319,7 +319,7 @@ public class PrefUtils {
     }
 
     public static boolean isCodeMirrorEditorEnabled(Context context) {
-        return getBooleanPref(context, PREF_EXPERIMENTAL_CODEMIRROR_EDITOR, false);
+        return getPrefs(context).getBoolean(PREF_EXPERIMENTAL_CODEMIRROR_EDITOR, false);
     }
 
     public static void sortNoteQuery(Query<Note> query, Context context, boolean includePinnedOrdering) {

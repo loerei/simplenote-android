@@ -392,6 +392,11 @@ public class SimplenoteEditText extends AppCompatMultiAutoCompleteTextView imple
             return;
         }
 
+        Editable editable = getText();
+        if (android.text.TextUtils.indexOf(editable, '-') == -1 && android.text.TextUtils.indexOf(editable, '[') == -1) {
+            return;
+        }
+
         try {
             ChecklistUtils.addChecklistSpansForRegexAndColor(
                 getContext(),

@@ -5,13 +5,12 @@ import android.content.Context
 import android.util.AttributeSet
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebView
-import androidx.webkit.WebViewClientCompat
-import androidx.webkit.WebViewCompat
+import android.webkit.WebViewClient
 
 /**
  * Custom WebView component hosting the CodeMirror 6 editor engine.
- * Extends WebViewClientCompat for API 23+ render process crash recovery and includes
- * explicit lifecycle teardown to prevent activity context memory leaks.
+ * Includes render process crash recovery and explicit lifecycle teardown
+ * to prevent activity context memory leaks.
  */
 class CodeMirrorEditorView @JvmOverloads constructor(
     context: Context,
@@ -28,12 +27,13 @@ class CodeMirrorEditorView @JvmOverloads constructor(
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun configureSettings() {
+        setLayerType(LAYER_TYPE_HARDWARE, null)
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.allowFileAccess = true
         settings.allowContentAccess = true
 
-        webViewClient = object : WebViewClientCompat() {
+        webViewClient = object : WebViewClient() {
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
                 onRenderProcessCrashListener?.invoke()
                 return true
