@@ -42,6 +42,8 @@ import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import android.view.inputmethod.InputConnectionWrapper;
+
 public class SimplenoteEditText extends AppCompatMultiAutoCompleteTextView implements AdapterView.OnItemClickListener {
     private static final Pattern INTERNOTE_LINK_PATTERN_EDIT = Pattern.compile("([^]]*)(]\\(" + SIMPLENOTE_LINK_PREFIX + SIMPLENOTE_LINK_ID + "\\))");
     private static final Pattern INTERNOTE_LINK_PATTERN_FULL = Pattern.compile("(?s)(.)*(\\[)" + INTERNOTE_LINK_PATTERN_EDIT);
@@ -50,6 +52,11 @@ public class SimplenoteEditText extends AppCompatMultiAutoCompleteTextView imple
     private LinkTokenizer mTokenizer;
     private final List<OnSelectionChangedListener> listeners;
     private OnCheckboxToggledListener mOnCheckboxToggledListener;
+    private boolean mIsComposing = false;
+
+    public boolean isComposing() {
+        return mIsComposing;
+    }
 
     @Override
     public boolean enoughToFilter() {
@@ -134,13 +141,38 @@ public class SimplenoteEditText extends AppCompatMultiAutoCompleteTextView imple
     @Override
     public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
         InputConnection baseInputConnection = super.onCreateInputConnection(outAttrs);
+        InputConnection ic = baseInputConnection;
 
         if (shouldOverridePredictiveTextBehavior()) {
             AppLog.add(AppLog.Type.EDITOR, "Samsung keyboard detected, overriding predictive text behavior");
-            return new SamsungInputConnection(this, baseInputConnection);
+            ic = new SamsungInputConnection(this, baseInputConnection);
         }
 
-        return baseInputConnection;
+        return new InputConnectionWrapper(ic, true) {
+            @Override
+            public boolean setComposingText(CharSequence text, int newCursorPosition) {
+                mIsComposing = true;
+                return super.setComposingText(text, newCursorPosition);
+            }
+
+            @Override
+            public boolean setComposingRegion(int start, int end) {
+                mIsComposing = true;
+                return super.setComposingRegion(start, end);
+            }
+
+            @Override
+            public boolean finishComposingText() {
+                mIsComposing = false;
+                return super.finishComposingText();
+            }
+
+            @Override
+            public boolean commitText(CharSequence text, int newCursorPosition) {
+                mIsComposing = false;
+                return super.commitText(text, newCursorPosition);
+            }
+        };
     }
 
     @Override
