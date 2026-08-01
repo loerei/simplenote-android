@@ -1,11 +1,11 @@
 /**
- * Simplenote CodeMirror 6 Engine (Virtualized Mobile WebView Editor)
+ * Simplenote Editor Engine (WebView Host)
  * Features:
- * - O(1) Viewport DOM Virtualization (Renders only lines visible in screen buffer)
- * - IME / Composition Event Handling for Android Soft Keyboards
- * - Instant cursor & selection synchronization
- * - 512KB IPC Bridge Chunking for ultra-large notes
- * - Passcode Security Masking & Dark/Light Theme Switching
+ * - Native Selection & Caret Position Preservation
+ * - Natural Touch Scroll Gesture Handling
+ * - IME / Composition Event Support
+ * - IPC Bridge Chunking for Large Notes
+ * - Dynamic Theme & Font Styling Synchronization
  */
 (function () {
     'use strict';
@@ -13,144 +13,47 @@
     const INTERFACE_NAME = 'SimplenoteBridge';
     const MAX_IPC_CHUNK_SIZE_BYTES = 524288; // 512 KB
     const AUTOSAVE_DEBOUNCE_MS = 150;
-    const BUFFER_LINES = 15; // Lines to pre-render above and below viewport
 
     let activeNoteId = null;
     let isSecuringContent = false;
     let debounceTimer = null;
-    let isInternalUpdate = false;
-    let isComposing = false;
 
-    // Document state representation
-    let docLines = [""];
-    let lineHeights = [];
-    let defaultLineHeight = 24; // Default px line height
-    let selectionAnchor = 0;
-    let selectionHead = 0;
-    let themeMode = 'light';
-
-    // DOM References
     const container = document.getElementById('editor-container');
-    const scrollContainer = document.createElement('div');
-    const spacerTop = document.createElement('div');
-    const spacerBottom = document.createElement('div');
-    const contentArea = document.createElement('div');
-    const hiddenInput = document.createElement('textarea');
+    const textarea = document.createElement('textarea');
 
-    /**
-     * Initializes the Virtualized CodeMirror Editor Engine
-     */
     function initEditor() {
-        scrollContainer.style.width = '100%';
-        scrollContainer.style.height = '100%';
-        scrollContainer.style.overflowY = 'auto';
-        scrollContainer.style.overflowX = 'hidden';
-        scrollContainer.style.position = 'relative';
-        scrollContainer.style.webkitOverflowScrolling = 'touch';
+        textarea.style.width = '100%';
+        textarea.style.height = '100%';
+        textarea.style.border = 'none';
+        textarea.style.outline = 'none';
+        textarea.style.resize = 'none';
+        textarea.style.padding = '16px';
+        textarea.style.boxSizing = 'border-box';
+        textarea.style.fontSize = '16px';
+        textarea.style.lineHeight = '1.5';
+        textarea.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+        textarea.style.background = 'transparent';
+        textarea.setAttribute('role', 'textbox');
+        textarea.setAttribute('aria-label', 'Note Editor');
+        textarea.setAttribute('autocorrect', 'off');
+        textarea.setAttribute('autocapitalize', 'off');
+        textarea.setAttribute('spellcheck', 'false');
 
-        contentArea.className = 'cm-content';
-        contentArea.style.boxSizing = 'border-box';
-        contentArea.style.padding = '16px';
-        contentArea.style.whiteSpace = 'pre-wrap';
-        contentArea.style.wordBreak = 'break-word';
-        contentArea.style.outline = 'none';
-        contentArea.style.minHeight = '100%';
-        contentArea.style.fontSize = '16px';
-        contentArea.style.lineHeight = '24px';
-        contentArea.style.fontFamily = 'monospace, system-ui, sans-serif';
-        contentArea.setAttribute('contenteditable', 'true');
-        contentArea.setAttribute('role', 'textbox');
-        contentArea.setAttribute('aria-label', 'Note Editor');
-        contentArea.setAttribute('autocorrect', 'off');
-        contentArea.setAttribute('autocapitalize', 'off');
-        contentArea.setAttribute('spellcheck', 'false');
+        container.appendChild(textarea);
 
-        spacerTop.style.width = '100%';
-        spacerBottom.style.width = '100%';
-
-        scrollContainer.appendChild(spacerTop);
-        scrollContainer.appendChild(contentArea);
-        scrollContainer.appendChild(spacerBottom);
-        container.appendChild(scrollContainer);
-
-        // Event Listeners for Virtualization and IME
-        scrollContainer.addEventListener('scroll', () => {
-            requestAnimationFrame(renderViewport);
-        }, { passive: true });
-
-        contentArea.addEventListener('input', (e) => {
-            if (isSecuringContent || isInternalUpdate) return;
-            handleContentInput();
-        });
-
-        contentArea.addEventListener('compositionstart', () => {
-            isComposing = true;
-        });
-
-        contentArea.addEventListener('compositionend', () => {
-            isComposing = false;
+        textarea.addEventListener('input', () => {
             if (isSecuringContent) return;
-            handleContentInput();
+            scheduleSync();
         });
 
-        document.addEventListener('selectionchange', () => {
-            if (isSecuringContent || isInternalUpdate) return;
-            updateSelectionFromDOM();
+        textarea.addEventListener('selectionchange', () => {
+            if (isSecuringContent) return;
+            scheduleSync();
         });
 
-        scrollContainer.addEventListener('click', () => {
-            if (contentArea) {
-                contentArea.focus();
-            }
+        container.addEventListener('click', () => {
+            textarea.focus();
         });
-
-        applyTheme(themeMode);
-        renderViewport();
-    }
-
-    /**
-     * O(1) Viewport DOM Virtualization Render Pass
-     * Only creates HTML nodes for lines currently visible in viewport + BUFFER_LINES
-     */
-    function renderViewport() {
-        if (isSecuringContent) {
-            contentArea.innerHTML = '';
-            spacerTop.style.height = '0px';
-            spacerBottom.style.height = '0px';
-            return;
-        }
-
-        const scrollTop = scrollContainer.scrollTop;
-        const viewportHeight = scrollContainer.clientHeight || window.innerHeight;
-        
-        const startLineIdx = Math.max(0, Math.floor(scrollTop / defaultLineHeight) - BUFFER_LINES);
-        const endLineIdx = Math.min(docLines.length - 1, Math.ceil((scrollTop + viewportHeight) / defaultLineHeight) + BUFFER_LINES);
-
-        const topHeight = startLineIdx * defaultLineHeight;
-        const bottomHeight = Math.max(0, (docLines.length - 1 - endLineIdx) * defaultLineHeight);
-
-        spacerTop.style.height = topHeight + 'px';
-        spacerBottom.style.height = bottomHeight + 'px';
-
-        // Render only visible line slice
-        const visibleSlice = docLines.slice(startLineIdx, endLineIdx + 1);
-        isInternalUpdate = true;
-        contentArea.innerHTML = visibleSlice.map(escapeHtml).join('<br>');
-        isInternalUpdate = false;
-    }
-
-    function handleContentInput() {
-        const rawText = contentArea.innerText || contentArea.textContent || '';
-        docLines = rawText.split('\n');
-        renderViewport();
-        scheduleSync();
-    }
-
-    function updateSelectionFromDOM() {
-        const sel = window.getSelection();
-        if (!sel || sel.rangeCount === 0) return;
-        // Selection sync anchor/head
-        scheduleSync();
     }
 
     function scheduleSync() {
@@ -166,13 +69,14 @@
 
         if (isSecuringContent || !window[INTERFACE_NAME]) return;
 
-        const fullContent = docLines.join('\n');
+        const fullContent = textarea.value;
+        const anchor = textarea.selectionStart || 0;
+        const head = textarea.selectionEnd || anchor;
         const bridge = window[INTERFACE_NAME];
 
         if (fullContent.length <= MAX_IPC_CHUNK_SIZE_BYTES) {
-            bridge.onContentChanged(activeNoteId, fullContent, selectionAnchor, selectionHead);
+            bridge.onContentChanged(activeNoteId, fullContent, anchor, head);
         } else {
-            // IPC Chunking for ultra-large notes
             const totalChunks = Math.ceil(fullContent.length / MAX_IPC_CHUNK_SIZE_BYTES);
             for (let i = 0; i < totalChunks; i++) {
                 const chunk = fullContent.substr(i * MAX_IPC_CHUNK_SIZE_BYTES, MAX_IPC_CHUNK_SIZE_BYTES);
@@ -181,70 +85,52 @@
         }
     }
 
-    function applyTheme(mode) {
-        themeMode = mode;
-        if (mode && mode.includes('dark')) {
-            document.body.style.backgroundColor = '#1e1e1e';
-            scrollContainer.style.backgroundColor = '#1e1e1e';
-            contentArea.style.color = '#d4d4d4';
-        } else {
-            document.body.style.backgroundColor = '#ffffff';
-            scrollContainer.style.backgroundColor = '#ffffff';
-            contentArea.style.color = '#000000';
-        }
-    }
-
-    function escapeHtml(str) {
-        return str
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#039;');
-    }
-
-    // Exposed Bridge Interface Methods
     window.SimplenoteEditorBridge = {
         loadNote: function (noteId, content, anchor, head) {
             activeNoteId = noteId;
-            const text = content || '';
-            docLines = text.split('\n');
-            selectionAnchor = anchor || 0;
-            selectionHead = head || anchor || 0;
-
-            if (scrollContainer) scrollContainer.scrollTop = 0;
-            renderViewport();
+            textarea.value = content || '';
+            if (anchor !== undefined && anchor !== null) {
+                try {
+                    textarea.setSelectionRange(anchor, head || anchor);
+                } catch (e) {}
+            }
         },
         setTheme: function (themeName) {
-            applyTheme(themeName);
+            if (themeName && themeName.includes('dark')) {
+                document.body.style.backgroundColor = '#1e1e1e';
+                textarea.style.backgroundColor = '#1e1e1e';
+                textarea.style.color = '#d4d4d4';
+            } else {
+                document.body.style.backgroundColor = '#ffffff';
+                textarea.style.backgroundColor = '#ffffff';
+                textarea.style.color = '#000000';
+            }
         },
         flushPendingChanges: function () {
             flushPendingChanges();
         },
         setSecuringContent: function (securing) {
             isSecuringContent = securing;
-            renderViewport();
+            if (securing) {
+                textarea.value = '';
+            }
         },
         updateStyle: function (fontSizeSp, isDark, textColorHex, bgColorHex, fontFamily) {
-            if (fontSizeSp && contentArea) {
-                contentArea.style.fontSize = fontSizeSp + 'sp';
-                defaultLineHeight = Math.round(fontSizeSp * 1.5);
-                contentArea.style.lineHeight = defaultLineHeight + 'px';
+            if (fontSizeSp) {
+                textarea.style.fontSize = fontSizeSp + 'sp';
             }
-            if (textColorHex && contentArea) {
-                contentArea.style.color = textColorHex;
+            if (textColorHex) {
+                textarea.style.color = textColorHex;
             }
-            if (bgColorHex && scrollContainer) {
-                scrollContainer.style.backgroundColor = bgColorHex;
+            if (bgColorHex) {
+                textarea.style.backgroundColor = bgColorHex;
                 document.body.style.backgroundColor = bgColorHex;
             }
-            if (fontFamily && contentArea) {
-                contentArea.style.fontFamily = fontFamily;
+            if (fontFamily) {
+                textarea.style.fontFamily = fontFamily;
             }
-            renderViewport();
         }
     };
 
-    // Auto-init on page load
     document.addEventListener('DOMContentLoaded', initEditor);
 })();

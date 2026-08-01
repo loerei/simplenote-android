@@ -48,6 +48,7 @@ class CodeMirrorEditorView @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
+        parent?.requestDisallowInterceptTouchEvent(true)
         val result = super.onTouchEvent(event)
         if (event.action == android.view.MotionEvent.ACTION_UP) {
             requestFocus()
