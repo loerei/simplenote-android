@@ -87,6 +87,8 @@ import com.automattic.simplenote.utils.SystemBarUtils;
 import com.automattic.simplenote.utils.ThemeUtils;
 import com.automattic.simplenote.utils.WidgetUtils;
 import com.automattic.simplenote.viewmodels.NoteEditorViewModel;
+import com.automattic.simplenote.widgets.CodeMirrorEditorView;
+import com.automattic.simplenote.widgets.EditorBridge;
 import com.automattic.simplenote.widgets.SimplenoteEditText;
 import com.google.android.material.chip.Chip;
 import com.google.android.material.chip.ChipGroup;
@@ -131,6 +133,9 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
     private Bucket<Note> mNotesBucket;
     private View mRootView;
     private View mTagPadding;
+    private CodeMirrorEditorView mCodeMirrorEditorView;
+    private EditorBridge mEditorBridge;
+    private boolean mIsSecuringContent;
     private SimplenoteEditText mContentEditText;
     private ChipGroup mTagChips;
     private TagsMultiAutoCompleteTextView mTagInput;
@@ -699,6 +704,10 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
         super.onPause();  // Always call the superclass method first
         mIsPaused = true;
 
+        if (mCodeMirrorEditorView != null) {
+            mCodeMirrorEditorView.flushPendingChanges();
+        }
+
         // Hide soft keyboard if it is showing...
         DisplayUtils.hideKeyboard(mContentEditText);
 
@@ -720,6 +729,15 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
         mHighlighter.stop();
         saveNote();
         AppLog.add(Type.SCREEN, "Paused (NoteEditorFragment)");
+    }
+
+    @Override
+    public void onDestroyView() {
+        if (mCodeMirrorEditorView != null) {
+            mCodeMirrorEditorView.destroy();
+            mCodeMirrorEditorView = null;
+        }
+        super.onDestroyView();
     }
 
     @Override
