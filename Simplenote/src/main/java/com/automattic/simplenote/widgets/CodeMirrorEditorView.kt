@@ -25,9 +25,11 @@ class CodeMirrorEditorView @JvmOverloads constructor(
         configureSettings()
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
+    @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
     private fun configureSettings() {
         setLayerType(LAYER_TYPE_HARDWARE, null)
+        isFocusable = true
+        isFocusableInTouchMode = true
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.allowFileAccess = true
@@ -41,9 +43,29 @@ class CodeMirrorEditorView @JvmOverloads constructor(
         }
     }
 
+    override fun onCheckIsTextEditor(): Boolean {
+        return true
+    }
+
+    override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
+        val result = super.onTouchEvent(event)
+        if (event.action == android.view.MotionEvent.ACTION_UP) {
+            requestFocus()
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+            imm?.showSoftInput(this, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        }
+        return result
+    }
+
     fun initializeBridge(editorBridge: EditorBridge) {
         addJavascriptInterface(editorBridge, EditorBridge.JAVASCRIPT_INTERFACE_NAME)
         loadUrl("file:///android_asset/editor/editor.html")
+    }
+
+    @JvmOverloads
+    fun updateStyle(fontSizeSp: Int, isDark: Boolean, textColorHex: String, bgColorHex: String, fontFamily: String = "sans-serif") {
+        val jsCall = "window.SimplenoteEditorBridge && window.SimplenoteEditorBridge.updateStyle($fontSizeSp, $isDark, '$textColorHex', '$bgColorHex', '$fontFamily');"
+        evaluateJavascript(jsCall, null)
     }
 
     @JvmOverloads

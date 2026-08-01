@@ -98,6 +98,12 @@
             updateSelectionFromDOM();
         });
 
+        scrollContainer.addEventListener('click', () => {
+            if (contentArea) {
+                contentArea.focus();
+            }
+        });
+
         applyTheme(themeMode);
         renderViewport();
     }
@@ -217,6 +223,24 @@
         },
         setSecuringContent: function (securing) {
             isSecuringContent = securing;
+            renderViewport();
+        },
+        updateStyle: function (fontSizeSp, isDark, textColorHex, bgColorHex, fontFamily) {
+            if (fontSizeSp && contentArea) {
+                contentArea.style.fontSize = fontSizeSp + 'sp';
+                defaultLineHeight = Math.round(fontSizeSp * 1.5);
+                contentArea.style.lineHeight = defaultLineHeight + 'px';
+            }
+            if (textColorHex && contentArea) {
+                contentArea.style.color = textColorHex;
+            }
+            if (bgColorHex && scrollContainer) {
+                scrollContainer.style.backgroundColor = bgColorHex;
+                document.body.style.backgroundColor = bgColorHex;
+            }
+            if (fontFamily && contentArea) {
+                contentArea.style.fontFamily = fontFamily;
+            }
             renderViewport();
         }
     };

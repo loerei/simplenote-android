@@ -494,6 +494,19 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
                     }
                 );
                 mCodeMirrorEditorView.initializeBridge(bridge);
+                
+                int fontSize = PrefUtils.getFontSize(requireContext());
+                boolean isDark = !ThemeUtils.isLightTheme(requireContext());
+                int textColorInt = ThemeUtils.getColorFromAttribute(requireContext(), R.attr.noteEditorTextColor);
+                int bgColorInt = ThemeUtils.getColorFromAttribute(requireContext(), R.attr.mainBackgroundColor);
+                String textColorHex = String.format("#%06X", (0xFFFFFF & textColorInt));
+                String bgColorHex = String.format("#%06X", (0xFFFFFF & bgColorInt));
+                
+                mCodeMirrorEditorView.postDelayed(() -> {
+                    if (mCodeMirrorEditorView != null) {
+                        mCodeMirrorEditorView.updateStyle(fontSize, isDark, textColorHex, bgColorHex);
+                    }
+                }, 300);
             }
         }
 
@@ -718,7 +731,12 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
 
             InputMethodManager inputMethodManager = (InputMethodManager) getActivity().getSystemService(Context.INPUT_METHOD_SERVICE);
             if (inputMethodManager != null) {
-                inputMethodManager.showSoftInput(mContentEditText, 0);
+                if (mCodeMirrorEditorView != null && mCodeMirrorEditorView.getVisibility() == View.VISIBLE) {
+                    mCodeMirrorEditorView.requestFocus();
+                    inputMethodManager.showSoftInput(mCodeMirrorEditorView, 0);
+                } else {
+                    inputMethodManager.showSoftInput(mContentEditText, 0);
+                }
             }
         }, 100);
     }
