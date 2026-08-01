@@ -28,16 +28,20 @@ public class LinkTokenizer implements MultiAutoCompleteTextView.Tokenizer {
     @Override
     public int findTokenStart(CharSequence text, int cursor) {
         int i = cursor;
+        int minIndex = Math.max(0, cursor - 100);
 
-        while (i > 0 && text.charAt(i - 1) != CHARACTER_BRACKET_OPEN) {
+        while (i > minIndex) {
+            char c = text.charAt(i - 1);
+            if (c == CHARACTER_BRACKET_OPEN) {
+                return i;
+            }
+            if (c == '\n') {
+                return cursor;
+            }
             i--;
         }
 
-        if (i < 1 || text.charAt(i - 1) != CHARACTER_BRACKET_OPEN) {
-            return cursor;
-        }
-
-        return i;
+        return cursor;
     }
 
     @Override

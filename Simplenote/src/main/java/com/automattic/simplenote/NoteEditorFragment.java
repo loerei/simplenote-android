@@ -87,6 +87,8 @@ import com.automattic.simplenote.utils.SystemBarUtils;
 import com.automattic.simplenote.utils.ThemeUtils;
 import com.automattic.simplenote.utils.WidgetUtils;
 import com.automattic.simplenote.viewmodels.NoteEditorViewModel;
+import com.automattic.simplenote.widgets.CodeMirrorEditorView;
+import com.automattic.simplenote.widgets.EditorBridge;
 import com.automattic.simplenote.widgets.SimplenoteEditText;
 import com.google.android.material.chip.Chip;
 import com.google.android.material.chip.ChipGroup;
@@ -131,6 +133,9 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
     private Bucket<Note> mNotesBucket;
     private View mRootView;
     private View mTagPadding;
+    private CodeMirrorEditorView mCodeMirrorEditorView;
+    private EditorBridge mEditorBridge;
+    private boolean mIsSecuringContent;
     private SimplenoteEditText mContentEditText;
     private ChipGroup mTagChips;
     private TagsMultiAutoCompleteTextView mTagInput;
@@ -468,6 +473,43 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
         mHighlighter = new MatchOffsetHighlighter(mMatchHighlighter, mContentEditText);
         mPlaceholderView = mRootView.findViewById(R.id.placeholder);
 
+        if (PrefUtils.isCodeMirrorEditorEnabled(requireContext())) {
+            ViewGroup parentContainer = (ViewGroup) mContentEditText.getParent();
+            if (parentContainer != null) {
+                mContentEditText.setVisibility(View.GONE);
+                mCodeMirrorEditorView = new CodeMirrorEditorView(requireContext());
+                mCodeMirrorEditorView.setLayoutParams(new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                ));
+                parentContainer.addView(mCodeMirrorEditorView);
+
+                EditorBridge bridge = new EditorBridge(
+                    mNote != null ? mNote.getSimperiumKey() : null,
+                    (noteId, content, cursorAnchor, cursorHead) -> {
+                        if (mNote != null && noteId.equals(mNote.getSimperiumKey())) {
+                            mNote.setContent(content);
+                            mNote.save();
+                        }
+                    }
+                );
+                mCodeMirrorEditorView.initializeBridge(bridge);
+                
+                int fontSize = PrefUtils.getFontSize(requireContext());
+                boolean isDark = !ThemeUtils.isLightTheme(requireContext());
+                int textColorInt = ThemeUtils.getColorFromAttribute(requireContext(), R.attr.noteEditorTextColor);
+                int bgColorInt = ThemeUtils.getColorFromAttribute(requireContext(), R.attr.mainBackgroundColor);
+                String textColorHex = String.format("#%06X", (0xFFFFFF & textColorInt));
+                String bgColorHex = String.format("#%06X", (0xFFFFFF & bgColorInt));
+                
+                mCodeMirrorEditorView.postDelayed(() -> {
+                    if (mCodeMirrorEditorView != null) {
+                        mCodeMirrorEditorView.updateStyle(fontSize, isDark, textColorHex, bgColorHex);
+                    }
+                }, 300);
+            }
+        }
+
         if (DisplayUtils.isLargeScreenLandscape(getActivity()) && mNote == null) {
             mPlaceholderView.setVisibility(View.VISIBLE);
             requireActivity().invalidateOptionsMenu();
@@ -689,7 +731,12 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
 
             InputMethodManager inputMethodManager = (InputMethodManager) getActivity().getSystemService(Context.INPUT_METHOD_SERVICE);
             if (inputMethodManager != null) {
-                inputMethodManager.showSoftInput(mContentEditText, 0);
+                if (mCodeMirrorEditorView != null && mCodeMirrorEditorView.getVisibility() == View.VISIBLE) {
+                    mCodeMirrorEditorView.requestFocus();
+                    inputMethodManager.showSoftInput(mCodeMirrorEditorView, 0);
+                } else {
+                    inputMethodManager.showSoftInput(mContentEditText, 0);
+                }
             }
         }, 100);
     }
@@ -698,6 +745,10 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
     public void onPause() {
         super.onPause();  // Always call the superclass method first
         mIsPaused = true;
+
+        if (mCodeMirrorEditorView != null) {
+            mCodeMirrorEditorView.flushPendingChanges();
+        }
 
         // Hide soft keyboard if it is showing...
         DisplayUtils.hideKeyboard(mContentEditText);
@@ -720,6 +771,15 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
         mHighlighter.stop();
         saveNote();
         AppLog.add(Type.SCREEN, "Paused (NoteEditorFragment)");
+    }
+
+    @Override
+    public void onDestroyView() {
+        if (mCodeMirrorEditorView != null) {
+            mCodeMirrorEditorView.destroy();
+            mCodeMirrorEditorView = null;
+        }
+        super.onDestroyView();
     }
 
     @Override
@@ -1073,6 +1133,9 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
 
     private void refreshContent(boolean isNoteUpdate) {
         if (mNote != null) {
+            if (mCodeMirrorEditorView != null) {
+                mCodeMirrorEditorView.loadNote(mNote.getSimperiumKey(), mNote.getContent());
+            }
             // Restore the cursor position if possible.
             int cursorPosition = newCursorLocation(mNote.getContent(), getNoteContentString(), mContentEditText.getSelectionEnd());
             mContentEditText.setText(mNote.getContent());
@@ -1182,9 +1245,17 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
 
     @Override
     public void afterTextChanged(Editable editable) {
-        attemptAutoList(editable);
-        setTitleSpan(editable);
-        mContentEditText.fixLineSpacing();
+        if (mContentEditText != null && mContentEditText.isComposing()) {
+            return;
+        }
+        if (mContentEditText != null) {
+            mContentEditText.post(() -> {
+                if (isAdded() && mContentEditText != null && !mContentEditText.isComposing()) {
+                    attemptAutoList(editable);
+                    setTitleSpan(editable);
+                }
+            });
+        }
     }
 
     @Override
@@ -1205,10 +1276,20 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
             ((NoteEditorActivity) requireActivity()).setSearchMatchBarVisible(false);
         }
 
-        // Temporarily remove the text watcher as we process checklists to prevent callback looping
-        mContentEditText.removeTextChangedListener(this);
-        mContentEditText.processChecklists();
-        mContentEditText.addTextChangedListener(this);
+        if (mContentEditText != null && mContentEditText.isComposing()) {
+            return;
+        }
+
+        if (mContentEditText != null) {
+            mContentEditText.post(() -> {
+                if (isAdded() && mContentEditText != null && !mContentEditText.isComposing()) {
+                    // Temporarily remove the text watcher as we process checklists to prevent callback looping
+                    mContentEditText.removeTextChangedListener(this);
+                    mContentEditText.processChecklists();
+                    mContentEditText.addTextChangedListener(this);
+                }
+            });
+        }
     }
 
     /**
@@ -1219,19 +1300,20 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
      * spans are removed when {@link MetricAffectingSpan} is removed.
      */
     private void setTitleSpan(Editable editable) {
-        for (MetricAffectingSpan span : editable.getSpans(0, editable.length(), MetricAffectingSpan.class)) {
-            if (span instanceof RelativeSizeSpan || span instanceof StyleSpan) {
-                editable.removeSpan(span);
-            }
-        }
-
-        int newLinePosition = getNoteContentString().indexOf("\n");
+        int newLinePosition = TextUtils.indexOf(editable, '\n');
 
         if (newLinePosition == 0) {
             return;
         }
 
         int titleEndPosition = (newLinePosition > 0) ? newLinePosition : editable.length();
+
+        for (MetricAffectingSpan span : editable.getSpans(0, Math.min(editable.length(), titleEndPosition + 1), MetricAffectingSpan.class)) {
+            if (span instanceof RelativeSizeSpan || span instanceof StyleSpan) {
+                editable.removeSpan(span);
+            }
+        }
+
         editable.setSpan(new RelativeSizeSpan(1.3f), 0, titleEndPosition, Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
         editable.setSpan(new StyleSpan(Typeface.BOLD), 0, titleEndPosition, Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
     }

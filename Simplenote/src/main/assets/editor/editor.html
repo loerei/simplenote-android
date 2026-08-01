@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Simplenote CodeMirror 6 Editor</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: transparent;
+            overflow: hidden;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+        #editor-container {
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+        }
+        .cm-editor {
+            height: 100%;
+            font-size: 16px;
+        }
+        .cm-content {
+            padding: 16px;
+            font-family: inherit;
+        }
+    </style>
+</head>
+<body>
+    <div id="editor-container"></div>
+    <script src="editor.bundle.js"></script>
+</body>
+</html>

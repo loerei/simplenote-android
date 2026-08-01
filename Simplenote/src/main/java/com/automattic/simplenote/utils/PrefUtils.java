@@ -87,6 +87,9 @@ public class PrefUtils {
     // string. Store notes linked to note widget instances.
     public static final String PREF_NOTE_WIDGET_NOTE = "pref_key_note_widget_";
 
+    // boolean, experimental CodeMirror 6 editor toggle (default false)
+    public static final String PREF_EXPERIMENTAL_CODEMIRROR_EDITOR = "pref_experimental_codemirror_editor";
+
     public static final String ALPHABETICAL_ASCENDING_LABEL = "alphabetical_az";
     public static final String ALPHABETICAL_DESCENDING_LABEL = "alphabetical_za";
     public static final String DATE_CREATED_ASCENDING_LABEL = "created_oldest";
@@ -313,6 +316,10 @@ public class PrefUtils {
         defaultFontSize = context.getResources().getInteger(R.integer.default_font_size);
 
         return getIntPref(context, PREF_FONT_SIZE, defaultFontSize);
+    }
+
+    public static boolean isCodeMirrorEditorEnabled(Context context) {
+        return getPrefs(context).getBoolean(PREF_EXPERIMENTAL_CODEMIRROR_EDITOR, false);
     }
 
     public static void sortNoteQuery(Query<Note> query, Context context, boolean includePinnedOrdering) {

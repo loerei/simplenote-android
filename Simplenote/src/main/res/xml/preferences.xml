@@ -86,6 +86,13 @@
             android:title="@string/detect_links">
         </SwitchPreferenceCompat>
 
+        <SwitchPreferenceCompat
+            android:key="pref_experimental_codemirror_editor"
+            android:defaultValue="false"
+            android:title="CodeMirror 6 Editor (Experimental)"
+            android:summary="Use viewport-virtualized CodeMirror 6 engine for fast note editing">
+        </SwitchPreferenceCompat>
+
     </PreferenceCategory>
 
     <PreferenceCategory

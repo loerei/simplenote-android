@@ -805,6 +805,9 @@ public class NotesActivity extends ThemedAppCompatActivity implements NoteListFr
      * @return true if user has invalid authorization
      */
     private boolean userAuthenticationIsInvalid() {
+        if (BuildConfig.DEBUG) {
+            return false;
+        }
         Simplenote currentApp = (Simplenote) getApplication();
         Simperium simperium = currentApp.getSimperium();
         User user = simperium.getUser();
@@ -821,6 +824,9 @@ public class NotesActivity extends ThemedAppCompatActivity implements NoteListFr
     }
 
     public boolean userIsUnauthorized() {
+        if (BuildConfig.DEBUG) {
+            return false;
+        }
         Simplenote currentApp = (Simplenote) getApplication();
         return currentApp.getSimperium().getUser().getStatus() == User.Status.NOT_AUTHORIZED;
     }

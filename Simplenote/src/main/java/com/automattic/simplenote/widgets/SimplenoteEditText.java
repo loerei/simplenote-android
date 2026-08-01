@@ -42,6 +42,8 @@ import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import android.view.inputmethod.InputConnectionWrapper;
+
 public class SimplenoteEditText extends AppCompatMultiAutoCompleteTextView implements AdapterView.OnItemClickListener {
     private static final Pattern INTERNOTE_LINK_PATTERN_EDIT = Pattern.compile("([^]]*)(]\\(" + SIMPLENOTE_LINK_PREFIX + SIMPLENOTE_LINK_ID + "\\))");
     private static final Pattern INTERNOTE_LINK_PATTERN_FULL = Pattern.compile("(?s)(.)*(\\[)" + INTERNOTE_LINK_PATTERN_EDIT);
@@ -50,10 +52,33 @@ public class SimplenoteEditText extends AppCompatMultiAutoCompleteTextView imple
     private LinkTokenizer mTokenizer;
     private final List<OnSelectionChangedListener> listeners;
     private OnCheckboxToggledListener mOnCheckboxToggledListener;
+    private boolean mIsComposing = false;
+
+    public boolean isComposing() {
+        return mIsComposing;
+    }
 
     @Override
     public boolean enoughToFilter() {
-        String substringCursor = getText().toString().substring(getSelectionEnd());
+        int end = getSelectionEnd();
+        if (end <= 0 || mTokenizer == null) {
+            return false;
+        }
+
+        Editable text = getText();
+        if (text == null || text.length() == 0) {
+            return false;
+        }
+
+        // Fast-path: limit search window to the current line to eliminate O(N^2) greedy regex backtracking
+        int lineStart = Math.max(0, text.toString().lastIndexOf('\n', Math.min(end - 1, text.length() - 1)));
+        CharSequence currentLine = text.subSequence(lineStart, Math.min(end, text.length()));
+
+        if (currentLine.length() == 0) {
+            return false;
+        }
+
+        String substringCursor = currentLine.toString();
         Matcher matcherEdit = INTERNOTE_LINK_PATTERN_EDIT.matcher(substringCursor);
 
         // When an internote link title is being edited, don't show an autocomplete popup.
@@ -65,20 +90,6 @@ public class SimplenoteEditText extends AppCompatMultiAutoCompleteTextView imple
                 return false;
             }
         }
-
-        Editable text = getText();
-        int end = getSelectionEnd();
-
-        if (end < 0) {
-            return false;
-        }
-
-		// solves a crash after updating dependencies in which this method
-	    // gets called in super() instantiation before the mTokenizer variable
-	    // is instantiated
-	    if (mTokenizer == null) {
-			return false;
-		}
 
         int start = mTokenizer.findTokenStart(text, end);
         return start > 0 && end - start >= 1;
@@ -130,13 +141,38 @@ public class SimplenoteEditText extends AppCompatMultiAutoCompleteTextView imple
     @Override
     public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
         InputConnection baseInputConnection = super.onCreateInputConnection(outAttrs);
+        InputConnection ic = baseInputConnection;
 
         if (shouldOverridePredictiveTextBehavior()) {
             AppLog.add(AppLog.Type.EDITOR, "Samsung keyboard detected, overriding predictive text behavior");
-            return new SamsungInputConnection(this, baseInputConnection);
+            ic = new SamsungInputConnection(this, baseInputConnection);
         }
 
-        return baseInputConnection;
+        return new InputConnectionWrapper(ic, true) {
+            @Override
+            public boolean setComposingText(CharSequence text, int newCursorPosition) {
+                mIsComposing = true;
+                return super.setComposingText(text, newCursorPosition);
+            }
+
+            @Override
+            public boolean setComposingRegion(int start, int end) {
+                mIsComposing = true;
+                return super.setComposingRegion(start, end);
+            }
+
+            @Override
+            public boolean finishComposingText() {
+                mIsComposing = false;
+                return super.finishComposingText();
+            }
+
+            @Override
+            public boolean commitText(CharSequence text, int newCursorPosition) {
+                mIsComposing = false;
+                return super.commitText(text, newCursorPosition);
+            }
+        };
     }
 
     @Override
@@ -389,6 +425,11 @@ public class SimplenoteEditText extends AppCompatMultiAutoCompleteTextView imple
 
     public void processChecklists() {
         if (getText().length() == 0 || getContext() == null) {
+            return;
+        }
+
+        Editable editable = getText();
+        if (android.text.TextUtils.indexOf(editable, '-') == -1 && android.text.TextUtils.indexOf(editable, '[') == -1) {
             return;
         }
 

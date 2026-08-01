@@ -24,8 +24,7 @@
             android:paddingEnd="@dimen/padding_extra_large"
             android:paddingStart="@dimen/padding_extra_large">
 
-            <androidx.core.widget.NestedScrollView
-                android:fillViewport="true"
+            <FrameLayout
                 android:layout_height="0dp"
                 android:layout_weight="1"
                 android:layout_width="match_parent">
@@ -51,7 +50,7 @@
                     android:imeOptions="flagNoExtractUi"
                     tools:context=".NoteEditorFragment"/>
 
-            </androidx.core.widget.NestedScrollView>
+            </FrameLayout>
 
             <HorizontalScrollView
                 android:id="@+id/horizontal_scroll_view"
