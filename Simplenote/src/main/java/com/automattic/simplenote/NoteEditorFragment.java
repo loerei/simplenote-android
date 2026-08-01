@@ -473,6 +473,30 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
         mHighlighter = new MatchOffsetHighlighter(mMatchHighlighter, mContentEditText);
         mPlaceholderView = mRootView.findViewById(R.id.placeholder);
 
+        if (PrefUtils.isCodeMirrorEditorEnabled(requireContext())) {
+            ViewGroup parentContainer = (ViewGroup) mContentEditText.getParent();
+            if (parentContainer != null) {
+                mContentEditText.setVisibility(View.GONE);
+                mCodeMirrorEditorView = new CodeMirrorEditorView(requireContext());
+                mCodeMirrorEditorView.setLayoutParams(new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                ));
+                parentContainer.addView(mCodeMirrorEditorView);
+
+                EditorBridge bridge = new EditorBridge(
+                    mNote != null ? mNote.getSimperiumKey() : null,
+                    (noteId, content, cursorAnchor, cursorHead) -> {
+                        if (mNote != null && noteId.equals(mNote.getSimperiumKey())) {
+                            mNote.setContent(content);
+                            mNote.save();
+                        }
+                    }
+                );
+                mCodeMirrorEditorView.initializeBridge(bridge);
+            }
+        }
+
         if (DisplayUtils.isLargeScreenLandscape(getActivity()) && mNote == null) {
             mPlaceholderView.setVisibility(View.VISIBLE);
             requireActivity().invalidateOptionsMenu();
@@ -1091,6 +1115,9 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
 
     private void refreshContent(boolean isNoteUpdate) {
         if (mNote != null) {
+            if (mCodeMirrorEditorView != null) {
+                mCodeMirrorEditorView.loadNote(mNote.getSimperiumKey(), mNote.getContent());
+            }
             // Restore the cursor position if possible.
             int cursorPosition = newCursorLocation(mNote.getContent(), getNoteContentString(), mContentEditText.getSelectionEnd());
             mContentEditText.setText(mNote.getContent());

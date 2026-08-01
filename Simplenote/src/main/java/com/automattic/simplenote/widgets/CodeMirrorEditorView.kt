@@ -46,6 +46,7 @@ class CodeMirrorEditorView @JvmOverloads constructor(
         loadUrl("file:///android_asset/editor/editor.html")
     }
 
+    @JvmOverloads
     fun loadNote(noteId: String, content: String, cursorAnchor: Int = 0, cursorHead: Int = 0) {
         val escapedContent = escapeJsString(content)
         val jsCall = "window.SimplenoteEditorBridge && window.SimplenoteEditorBridge.loadNote('$noteId', '$escapedContent', $cursorAnchor, $cursorHead);"
