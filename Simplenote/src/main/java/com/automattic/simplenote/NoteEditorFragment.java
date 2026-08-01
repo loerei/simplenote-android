@@ -1280,10 +1280,16 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
             return;
         }
 
-        // Temporarily remove the text watcher as we process checklists to prevent callback looping
-        mContentEditText.removeTextChangedListener(this);
-        mContentEditText.processChecklists();
-        mContentEditText.addTextChangedListener(this);
+        if (mContentEditText != null) {
+            mContentEditText.post(() -> {
+                if (isAdded() && mContentEditText != null && !mContentEditText.isComposing()) {
+                    // Temporarily remove the text watcher as we process checklists to prevent callback looping
+                    mContentEditText.removeTextChangedListener(this);
+                    mContentEditText.processChecklists();
+                    mContentEditText.addTextChangedListener(this);
+                }
+            });
+        }
     }
 
     /**
