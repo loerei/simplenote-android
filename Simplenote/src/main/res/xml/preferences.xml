@@ -70,6 +70,13 @@
     <PreferenceCategory
         android:title="@string/editor">
 
+        <SwitchPreferenceCompat
+            android:key="pref_key_use_single_editor_engine"
+            android:defaultValue="true"
+            android:title="Single EditText Engine (Experimental)"
+            android:summary="Use single native EditText engine instead of multi-block RecyclerView">
+        </SwitchPreferenceCompat>
+
         <ListPreference
             android:key="pref_key_font_size"
             android:defaultValue="@integer/default_font_size"

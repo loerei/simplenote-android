@@ -31,6 +31,21 @@
                 android:scrollbars="vertical"
                 tools:context=".NoteEditorFragment" />
 
+            <com.automattic.simplenote.widgets.SimplenoteEditText
+                android:id="@+id/single_note_content"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@null"
+                android:gravity="top|start"
+                android:inputType="textMultiLine|textCapSentences"
+                android:paddingTop="@dimen/padding_extra_extra_large"
+                android:paddingBottom="@dimen/padding_extra_extra_large"
+                android:scrollbars="vertical"
+                android:textColor="?attr/noteEditorTextColor"
+                android:textColorHint="?attr/hintTextColor"
+                android:textSize="@dimen/text_content"
+                android:visibility="gone" />
+
         </FrameLayout>
 
         <HorizontalScrollView

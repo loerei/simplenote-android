@@ -89,6 +89,7 @@ import com.automattic.simplenote.utils.SpaceTokenizer;
 import com.automattic.simplenote.utils.TagsMultiAutoCompleteTextView;
 import com.automattic.simplenote.utils.TagsMultiAutoCompleteTextView.OnTagAddedListener;
 import com.automattic.simplenote.utils.TextHighlighter;
+import com.automattic.simplenote.utils.ViewportSpanWindowingManager;
 import com.automattic.simplenote.utils.SystemBarUtils;
 import com.automattic.simplenote.utils.ThemeUtils;
 import com.automattic.simplenote.utils.TypingTracer;
@@ -446,19 +447,38 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
         mRootView = inflater.inflate(R.layout.fragment_note_editor, container, false);
-        mContentEditText = mRootView.findViewById(R.id.note_content);
         mBlockRecyclerView = mRootView.findViewById(R.id.block_note_recycler);
-        if (mBlockRecyclerView != null) {
-            mBlockPositionMapper = new BlockPositionMapper();
-            mSimperiumSyncAdapter = new SimperiumSyncAdapter();
-            mBlockAdapter = new BlockNoteAdapter(new java.util.ArrayList<>(), () -> {
-                saveAndSyncNote();
-                return null;
-            });
-            mBlockRecyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
-            mBlockRecyclerView.setAdapter(mBlockAdapter);
-            mSelectionManager = new CrossBlockSelectionManager(mBlockRecyclerView, mBlockAdapter, mBlockPositionMapper);
-            mSelectionManager.attach();
+        SimplenoteEditText singleEditText = mRootView.findViewById(R.id.single_note_content);
+
+        com.automattic.simplenote.adapters.BlockEditorConfig.USE_SINGLE_EDITOR_ENGINE =
+                PrefUtils.getBoolPref(requireContext(), "pref_key_use_single_editor_engine", true);
+
+        if (com.automattic.simplenote.adapters.BlockEditorConfig.USE_SINGLE_EDITOR_ENGINE && singleEditText != null) {
+            if (mBlockRecyclerView != null) {
+                mBlockRecyclerView.setVisibility(View.GONE);
+            }
+            singleEditText.setVisibility(View.VISIBLE);
+            mContentEditText = singleEditText;
+            ViewportSpanWindowingManager windowingManager = new ViewportSpanWindowingManager(singleEditText, 50);
+            singleEditText.getViewTreeObserver().addOnScrollChangedListener(windowingManager::updateViewportSpans);
+        } else {
+            if (singleEditText != null) {
+                singleEditText.setVisibility(View.GONE);
+            }
+            mContentEditText = mRootView.findViewById(R.id.note_content);
+            if (mBlockRecyclerView != null) {
+                mBlockRecyclerView.setVisibility(View.VISIBLE);
+                mBlockPositionMapper = new BlockPositionMapper();
+                mSimperiumSyncAdapter = new SimperiumSyncAdapter();
+                mBlockAdapter = new BlockNoteAdapter(new java.util.ArrayList<>(), () -> {
+                    saveAndSyncNote();
+                    return null;
+                });
+                mBlockRecyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
+                mBlockRecyclerView.setAdapter(mBlockAdapter);
+                mSelectionManager = new CrossBlockSelectionManager(mBlockRecyclerView, mBlockAdapter, mBlockPositionMapper);
+                mSelectionManager.attach();
+            }
         }
         // DODROID-884: don't persist the (potentially huge) note body in saved instance
         // state — it overflows the binder transaction limit on activityStopped. The content
@@ -1119,7 +1139,7 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
             // Restore the cursor position if possible.
             int currentSelection = (mContentEditText != null) ? mContentEditText.getSelectionEnd() : 0;
             int cursorPosition = newCursorLocation(mNote.getContent(), getNoteContentString(), currentSelection);
-            if (mBlockAdapter != null) {
+            if (!com.automattic.simplenote.adapters.BlockEditorConfig.USE_SINGLE_EDITOR_ENGINE && mBlockAdapter != null) {
                 if (isNoteUpdate) {
                     boolean changed = mSimperiumSyncAdapter.reconcileRemoteContent(
                         mBlockAdapter.getBlocks(),
@@ -1412,6 +1432,9 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
     }
 
     private String getNoteContentString() {
+        if (!com.automattic.simplenote.adapters.BlockEditorConfig.USE_SINGLE_EDITOR_ENGINE && mBlockAdapter != null && mSimperiumSyncAdapter != null) {
+            return mSimperiumSyncAdapter.serializeBlocks(mBlockAdapter.getBlocks());
+        }
         if (mContentEditText == null || mContentEditText.getText() == null) {
             return "";
         } else {

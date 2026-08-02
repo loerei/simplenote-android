@@ -16,6 +16,8 @@ import com.automattic.simplenote.models.Block
 import com.automattic.simplenote.widgets.CrossBlockSelectionManager
 
 object BlockEditorConfig {
+    @JvmField
+    var USE_SINGLE_EDITOR_ENGINE: Boolean = true
     const val SYNC_DEBOUNCE_MS = 300L
     const val MAX_BLOCK_LENGTH = 4000
     const val UI_CHUNK_BATCH_SIZE = 50
