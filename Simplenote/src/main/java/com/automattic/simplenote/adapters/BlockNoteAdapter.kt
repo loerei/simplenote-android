@@ -78,7 +78,7 @@ class BlockNoteAdapter(
             val runnable = object : Runnable {
                 override fun run() {
                     val currentNow = System.currentTimeMillis()
-                    if (isDeleteKeyCurrentlyPressed && (currentNow - lastDeleteTimestamp) <= 400L && targetPos in blocks.indices) {
+                    if (isDeleteKeyCurrentlyPressed && targetPos in blocks.indices) {
                         val block = blocks[targetPos]
                         val vh = attachedRecyclerView?.findViewHolderForAdapterPosition(targetPos) as? BlockViewHolder
                         if (vh != null && vh.editText.selectionStart > 0) {
