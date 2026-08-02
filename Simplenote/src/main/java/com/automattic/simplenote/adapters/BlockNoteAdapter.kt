@@ -42,12 +42,21 @@ class BlockNoteAdapter(
     // DYNAMIC ACCELERATION & CHUNK SIZE TRACKER FOR CROSS-BLOCK CONTINUOUS DELETE
     var isDeleteKeyCurrentlyPressed: Boolean = false
     var lastDeleteTimestamp: Long = 0L
+    var deleteHoldStartTimestamp: Long = 0L
     var lastMeasuredDeleteIntervalMs: Long = 54L
     var lastDeleteChunkSize: Int = 1
     private var activeBridgeRunnable: Runnable? = null
 
-    private fun updateDeleteVelocityTracker() {
+    private fun updateDeleteVelocityTracker(pos: Int, selectionStart: Int) {
         val now = System.currentTimeMillis()
+        if (deleteHoldStartTimestamp == 0L) {
+            deleteHoldStartTimestamp = now
+            Log.d(TAG_CURSOR, "[DELETE_SESSION] Giữ (0.000s) | Pos: $pos | SelStart: $selectionStart")
+        } else {
+            val elapsedSec = (now - deleteHoldStartTimestamp) / 1000.0
+            Log.d(TAG_CURSOR, "[DELETE_SESSION] Event (+${String.format("%.3f", elapsedSec)}s) | Pos: $pos | SelStart: $selectionStart")
+        }
+
         if (lastDeleteTimestamp > 0L) {
             val delta = now - lastDeleteTimestamp
             if (delta in 20L..200L) {
@@ -58,7 +67,13 @@ class BlockNoteAdapter(
         isDeleteKeyCurrentlyPressed = true
     }
 
-    private fun stopContinuousDeleteBridge() {
+    private fun stopContinuousDeleteBridge(pos: Int = -1, selectionStart: Int = -1) {
+        val now = System.currentTimeMillis()
+        if (deleteHoldStartTimestamp > 0L) {
+            val elapsedSec = (now - deleteHoldStartTimestamp) / 1000.0
+            Log.d(TAG_CURSOR, "[DELETE_SESSION] Thả (+${String.format("%.3f", elapsedSec)}s) | Pos: $pos | SelStart: $selectionStart")
+            deleteHoldStartTimestamp = 0L
+        }
         isDeleteKeyCurrentlyPressed = false
         activeBridgeRunnable?.let { mainHandler.removeCallbacks(it) }
         activeBridgeRunnable = null
@@ -90,7 +105,8 @@ class BlockNoteAdapter(
                                 block.content = editable.toString()
                                 block.baseContent = block.content
                                 vh.editText.setSelection(currentSel - deleteLen)
-                                Log.d(TAG_CURSOR, "[CONTINUOUS_DELETE_BRIDGE] Bridged $deleteLen char delete at Pos: $targetPos | NewOffset: ${currentSel - deleteLen}")
+                                val elapsedSec = if (deleteHoldStartTimestamp > 0L) (currentNow - deleteHoldStartTimestamp) / 1000.0 else 0.0
+                                Log.d(TAG_CURSOR, "[DELETE_SESSION] Bridge Event (+${String.format("%.3f", elapsedSec)}s) | Pos: $targetPos | NewOffset: ${currentSel - deleteLen}")
                                 mainHandler.postDelayed(this, interval)
                             }
                         }
@@ -308,13 +324,14 @@ class BlockNoteAdapter(
                 if (pos == RecyclerView.NO_POSITION || pos !in blocks.indices) return@OnKeyListener false
 
                 if (keyCode == KeyEvent.KEYCODE_DEL) {
-                    if (event.action == KeyEvent.ACTION_DOWN) {
-                        updateDeleteVelocityTracker()
-                    } else if (event.action == KeyEvent.ACTION_UP) {
-                        stopContinuousDeleteBridge()
-                    }
                     val selectionStart = editText.selectionStart
                     val selectionEnd = editText.selectionEnd
+
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        updateDeleteVelocityTracker(pos, selectionStart)
+                    } else if (event.action == KeyEvent.ACTION_UP) {
+                        stopContinuousDeleteBridge(pos, selectionStart)
+                    }
 
                     Log.d(TAG_CURSOR, "[EVENT_KEY_DEL] Action: ${event.action} | Pos: $pos | SelStart: $selectionStart | SelEnd: $selectionEnd | TextLen: ${editText.text.length}")
 
