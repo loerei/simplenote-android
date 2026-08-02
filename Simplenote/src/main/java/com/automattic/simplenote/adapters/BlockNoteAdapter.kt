@@ -29,6 +29,7 @@ class BlockNoteAdapter(
 
     companion object {
         private const val TAG = "SIMPLENOTE_PERF_ADAPTER"
+        private const val TAG_CURSOR = "SIMPLENOTE_PERF_CURSOR"
     }
 
     var activeFocusedBlockId: String? = null
@@ -97,7 +98,7 @@ class BlockNoteAdapter(
                 holder.editText.requestFocus()
                 val safeOffset = cursorOffset.coerceIn(0, holder.editText.text.length)
                 holder.editText.setSelection(safeOffset)
-                pendingFocusCursorOffset = null
+                Log.d(TAG_CURSOR, "[EVENT_FOCUS_SYNC] Pos: $targetPosition | TargetOffset: $cursorOffset | AppliedOffset: $safeOffset | BlockId: ${targetBlock.id}")
             }
         }
 
@@ -246,6 +247,7 @@ class BlockNoteAdapter(
                         true
                     }
                     KeyEvent.KEYCODE_DEL -> {
+                        Log.d(TAG_CURSOR, "[EVENT_KEY_DEL] Pos: $pos | SelStart: $selectionStart | SelEnd: $selectionEnd | TextLen: ${editText.text.length} | BlockContent: '${blocks[pos].content}'")
                         if (selectionStart == 0 && selectionEnd == 0 && pos > 0) {
                             finishImeComposition()
                             handleBackspaceAtStart(pos)
@@ -280,11 +282,11 @@ class BlockNoteAdapter(
 
             if (block.id == activeFocusedBlockId) {
                 editText.requestFocus()
-                pendingFocusCursorOffset?.let { offset ->
-                    val safeOffset = offset.coerceIn(0, editText.text.length)
-                    editText.setSelection(safeOffset)
-                    pendingFocusCursorOffset = null
-                }
+                val targetOffset = pendingFocusCursorOffset ?: editText.text.length
+                val safeOffset = targetOffset.coerceIn(0, editText.text.length)
+                editText.setSelection(safeOffset)
+                Log.d(TAG_CURSOR, "[EVENT_BIND_SELECTION] Pos: $position | SafeOffset: $safeOffset | BlockContentLen: ${editText.text.length}")
+                pendingFocusCursorOffset = null
             }
         }
 
@@ -356,6 +358,8 @@ class BlockNoteAdapter(
 
         val mergedContent = prevBlock.content + currentBlock.content
         val prevLength = prevBlock.content.length
+
+        Log.d(TAG_CURSOR, "[EVENT_MERGE_BACKSPACE] Pos: $pos -> Merging with Pos: ${pos - 1} | PrevContent: '${prevBlock.content}' | CurrentContent: '${currentBlock.content}' | TargetOffset: $prevLength")
 
         if (mergedContent.length <= BlockEditorConfig.MAX_BLOCK_LENGTH) {
             prevBlock.content = mergedContent
