@@ -2,6 +2,7 @@ package com.automattic.simplenote.adapters
 
 import android.text.Editable
 import android.text.TextWatcher
+import android.util.Log
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
@@ -22,6 +23,10 @@ class BlockNoteAdapter(
     private val onBlockContentChanged: (() -> Unit)? = null
 ) : RecyclerView.Adapter<BlockNoteAdapter.BlockViewHolder>() {
 
+    companion object {
+        private const val TAG = "SIMPLENOTE_PERF_ADAPTER"
+    }
+
     var activeFocusedBlockId: String? = null
     var pendingFocusCursorOffset: Int? = null
     var selectionManager: CrossBlockSelectionManager? = null
@@ -32,9 +37,12 @@ class BlockNoteAdapter(
     }
 
     fun setBlocks(newBlocks: List<Block>) {
+        val t0 = System.nanoTime()
         blocks.clear()
         blocks.addAll(newBlocks)
         safeNotifyDataSetChanged()
+        val durationMs = (System.nanoTime() - t0) / 1_000_000.0
+        Log.d(TAG, "[setBlocks] Blocks: ${blocks.size} | Duration: ${String.format("%.3f", durationMs)} ms")
     }
 
     override fun getItemCount(): Int = blocks.size
@@ -52,6 +60,24 @@ class BlockNoteAdapter(
     override fun onViewRecycled(holder: BlockViewHolder) {
         holder.unbind()
         super.onViewRecycled(holder)
+    }
+
+    fun focusBlock(targetPosition: Int, cursorOffset: Int) {
+        val t0 = System.nanoTime()
+        if (targetPosition !in blocks.indices) return
+        val oldActiveId = activeFocusedBlockId
+        val targetBlock = blocks[targetPosition]
+
+        activeFocusedBlockId = targetBlock.id
+        pendingFocusCursorOffset = cursorOffset
+
+        val oldPos = blocks.indexOfFirst { it.id == oldActiveId }
+        if (oldPos != -1 && oldPos != targetPosition) {
+            safeNotifyItemChanged(oldPos)
+        }
+        safeNotifyItemChanged(targetPosition)
+        val durationMs = (System.nanoTime() - t0) / 1_000_000.0
+        Log.d(TAG, "[focusBlock] Thread: ${Thread.currentThread().name} | OldPos: $oldPos -> TargetPos: $targetPosition | CursorOffset: $cursorOffset | Duration: ${String.format("%.3f", durationMs)} ms")
     }
 
     inner class BlockViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
@@ -75,6 +101,7 @@ class BlockNoteAdapter(
                     val newText = s?.toString() ?: ""
 
                     if (currentBlock.content != newText) {
+                        val t0 = System.nanoTime()
                         if (newText.contains('\n')) {
                             val lines = newText.split("\n")
                             val originalTrailing = currentBlock.hasTrailingNewline
@@ -127,7 +154,10 @@ class BlockNoteAdapter(
                             val lastOffset = blocks[lastBlockIndex].content.length
                             focusBlock(lastBlockIndex, lastOffset)
 
-                            onBlockContentChanged?.invoke()
+                            val durationMs = (System.nanoTime() - t0) / 1_000_000.0
+                            Log.d(TAG, "[onTextChanged] MULTILINE PASTE | Lines: ${lines.size} | InsertedBlocks: $insertedCount | Duration: ${String.format("%.3f", durationMs)} ms")
+
+                            notifyContentChanged()
                             return
                         }
 
@@ -137,7 +167,9 @@ class BlockNoteAdapter(
                             splitSoftChunkIfNeeded(currentPos)
                         }
 
-                        onBlockContentChanged?.invoke()
+                        val durationMs = (System.nanoTime() - t0) / 1_000_000.0
+                        Log.d(TAG, "[onTextChanged] SINGLE LINE EDIT | Pos: $currentPos | NewLength: ${newText.length} | Duration: ${String.format("%.3f", durationMs)} ms")
+                        notifyContentChanged()
                     }
                 }
                 override fun afterTextChanged(s: Editable?) {}
@@ -182,32 +214,20 @@ class BlockNoteAdapter(
                             true
                         } else false
                     }
-                    KeyEvent.KEYCODE_DPAD_UP -> {
-                        val layout = editText.layout
-                        if (selectionStart >= 0 && layout != null && layout.getLineForOffset(selectionStart) == 0 && pos > 0) {
-                            val prevLen = blocks[pos - 1].content.length
-                            focusBlock(pos - 1, prevLen)
-                            true
-                        } else false
-                    }
-                    KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        val layout = editText.layout
-                        if (selectionStart >= 0 && layout != null && layout.getLineForOffset(selectionStart) == layout.lineCount - 1 && pos < blocks.size - 1) {
-                            focusBlock(pos + 1, 0)
-                            true
-                        } else false
-                    }
                     else -> false
                 }
             }
             editText.setOnKeyListener(onKeyListener)
 
             editText.setOnFocusChangeListener { _, hasFocus ->
-                if (hasFocus) {
-                    val pos = adapterPosition
-                    if (pos != RecyclerView.NO_POSITION && pos in blocks.indices) {
+                val pos = adapterPosition
+                if (pos != RecyclerView.NO_POSITION && pos in blocks.indices) {
+                    if (hasFocus) {
+                        Log.d(TAG, "[onFocusChangeListener] FOCUS GAINED | Pos: $pos | BlockId: ${blocks[pos].id}")
                         activeFocusedBlockId = blocks[pos].id
                         blocks[pos].baseContent = blocks[pos].content
+                    } else {
+                        Log.d(TAG, "[onFocusChangeListener] FOCUS LOST | Pos: $pos | BlockId: ${blocks[pos].id}")
                     }
                 }
             }
@@ -239,13 +259,9 @@ class BlockNoteAdapter(
         }
     }
 
-    fun focusBlock(position: Int, cursorOffset: Int) {
-        if (position in blocks.indices) {
-            val targetBlock = blocks[position]
-            activeFocusedBlockId = targetBlock.id
-            pendingFocusCursorOffset = cursorOffset
-            safeNotifyItemChanged(position)
-        }
+    private fun notifyContentChanged() {
+        Log.d(TAG, "[notifyContentChanged] Triggering onBlockContentChanged callback")
+        onBlockContentChanged?.invoke()
     }
 
     private fun handleEnterKey(pos: Int, selectionStart: Int, selectionEnd: Int) {
@@ -274,7 +290,7 @@ class BlockNoteAdapter(
         safeNotifyItemChanged(pos)
         safeNotifyItemInserted(pos + 1)
         focusBlock(pos + 1, 0)
-        onBlockContentChanged?.invoke()
+        notifyContentChanged()
     }
 
     private fun handleBackspaceAtStart(pos: Int) {
@@ -287,13 +303,14 @@ class BlockNoteAdapter(
                 prevBlock.baseContent = prevBlock.content
                 safeNotifyItemChanged(pos - 1)
                 focusBlock(pos - 1, prevBlock.content.length)
-                onBlockContentChanged?.invoke()
+                notifyContentChanged()
             }
             return
         }
 
-        val prevLength = prevBlock.content.length
         val mergedContent = prevBlock.content + currentBlock.content
+        val prevLength = prevBlock.content.length
+
         if (mergedContent.length <= BlockEditorConfig.MAX_BLOCK_LENGTH) {
             prevBlock.content = mergedContent
             prevBlock.hasTrailingNewline = currentBlock.hasTrailingNewline
@@ -323,7 +340,7 @@ class BlockNoteAdapter(
             safeNotifyItemChanged(pos)
             focusBlock(pos - 1, prevLength.coerceAtMost(firstChunk.length))
         }
-        onBlockContentChanged?.invoke()
+        notifyContentChanged()
     }
 
     private fun handleForwardDeleteAtEnd(pos: Int) {
@@ -332,10 +349,10 @@ class BlockNoteAdapter(
 
         if (!currentBlock.hasTrailingNewline) {
             if (nextBlock.content.isNotEmpty()) {
-                nextBlock.content = nextBlock.content.drop(1)
+                nextBlock.content = nextBlock.content.substring(1)
                 nextBlock.baseContent = nextBlock.content
                 safeNotifyItemChanged(pos + 1)
-                onBlockContentChanged?.invoke()
+                notifyContentChanged()
             }
             return
         }
@@ -368,12 +385,14 @@ class BlockNoteAdapter(
             safeNotifyItemChanged(pos)
             safeNotifyItemChanged(pos + 1)
         }
-        onBlockContentChanged?.invoke()
+        notifyContentChanged()
     }
 
     private fun splitSoftChunkIfNeeded(startPos: Int) {
         var currentPos = startPos
+        var splitLoops = 0
         while (currentPos in blocks.indices && blocks[currentPos].content.length > BlockEditorConfig.MAX_BLOCK_LENGTH) {
+            splitLoops++
             val block = blocks[currentPos]
 
             var splitIndex = block.content.lastIndexOf(' ', BlockEditorConfig.MAX_BLOCK_LENGTH)
@@ -381,26 +400,30 @@ class BlockNoteAdapter(
                 splitIndex = BlockEditorConfig.MAX_BLOCK_LENGTH
             }
 
-            val originalTrailing = block.hasTrailingNewline
-            val firstPart = block.content.substring(0, splitIndex)
-            val secondPart = block.content.substring(splitIndex)
+            val firstChunk = block.content.substring(0, splitIndex)
+            val secondChunk = block.content.substring(splitIndex)
 
-            block.content = firstPart
+            val originalTrailingNewline = block.hasTrailingNewline
+
+            block.content = firstChunk
             block.hasTrailingNewline = false
-            block.baseContent = firstPart
+            block.baseContent = firstChunk
 
-            val newChunk = Block(
-                content = secondPart,
-                hasTrailingNewline = originalTrailing,
-                baseContent = secondPart
+            val newBlock = Block(
+                content = secondChunk,
+                hasTrailingNewline = originalTrailingNewline,
+                baseContent = secondChunk
             )
 
-            blocks.add(currentPos + 1, newChunk)
+            blocks.add(currentPos + 1, newBlock)
+
             safeNotifyItemChanged(currentPos)
             safeNotifyItemInserted(currentPos + 1)
 
             currentPos++
         }
+
+        Log.d(TAG, "[splitSoftChunkIfNeeded] StartPos: $startPos | Split Loops: $splitLoops")
 
         val firstBlockPartLength = blocks[startPos].content.length
         val currentOffset = pendingFocusCursorOffset ?: firstBlockPartLength
@@ -409,7 +432,7 @@ class BlockNoteAdapter(
         } else {
             focusBlock(startPos, currentOffset)
         }
-        onBlockContentChanged?.invoke()
+        notifyContentChanged()
     }
 
     private fun safeNotifyDataSetChanged() {

@@ -1109,7 +1109,9 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
     }
 
     private void refreshContent(boolean isNoteUpdate) {
+        long t0 = System.nanoTime();
         if (mNote != null) {
+            android.util.Log.d("SIMPLENOTE_PERF_EDITOR", "[refreshContent] START | isNoteUpdate=" + isNoteUpdate + " | noteId=" + mNote.getSimperiumKey() + " | Thread=" + Thread.currentThread().getName());
             // Restore the cursor position if possible.
             int currentSelection = (mContentEditText != null) ? mContentEditText.getSelectionEnd() : 0;
             int cursorPosition = newCursorLocation(mNote.getContent(), getNoteContentString(), currentSelection);
@@ -1120,6 +1122,7 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
                         mNote.getContent(),
                         mBlockAdapter.getActiveFocusedBlockId()
                     );
+                    android.util.Log.d("SIMPLENOTE_PERF_EDITOR", "[refreshContent] reconcileRemoteContent changed=" + changed);
                     if (changed) {
                         mBlockAdapter.notifyDataSetChanged();
                     }
@@ -1129,6 +1132,8 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
             } else if (mContentEditText != null) {
                 mContentEditText.setText(mNote.getContent());
             }
+            long durationMs = (long) ((System.nanoTime() - t0) / 1_000_000.0);
+            android.util.Log.d("SIMPLENOTE_PERF_EDITOR", "[refreshContent] FINISHED | Duration=" + durationMs + " ms");
             // Set the scroll position after the note's content has been rendered
             mRootView.post(this::setScroll);
 
@@ -1322,6 +1327,7 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
             return;
         }
 
+        android.util.Log.d("SIMPLENOTE_PERF_EDITOR", "[saveAndSyncNote] Executing SaveNoteTask | noteId=" + mNote.getSimperiumKey() + " | Thread=" + Thread.currentThread().getName());
         AppLog.add(
             Type.ACTION,
             "Edited note (ID: " + mNote.getSimperiumKey() +

@@ -1,11 +1,17 @@
 package com.automattic.simplenote.utils
 
+import android.util.Log
 import com.automattic.simplenote.adapters.BlockEditorConfig
 import com.automattic.simplenote.models.Block
 
 class SimperiumSyncAdapter {
 
+    companion object {
+        private const val TAG = "SIMPLENOTE_PERF_SYNC"
+    }
+
     fun serializeBlocks(blocks: List<Block>): String {
+        val t0 = System.nanoTime()
         val totalLength = blocks.sumOf { it.content.length + if (it.hasTrailingNewline) 1 else 0 }
         val sb = StringBuilder(totalLength)
         for (block in blocks) {
@@ -14,16 +20,20 @@ class SimperiumSyncAdapter {
                 sb.append("\n")
             }
         }
+        val durationMs = (System.nanoTime() - t0) / 1_000_000.0
+        Log.d(TAG, "[serializeBlocks] Thread: ${Thread.currentThread().name} | Blocks: ${blocks.size} | Total Chars: $totalLength | Duration: ${String.format("%.3f", durationMs)} ms")
         return sb.toString()
     }
 
     fun parseToBlocks(text: String): List<Block> {
+        val t0 = System.nanoTime()
         if (text.isEmpty()) {
             return listOf(Block(content = "", hasTrailingNewline = false))
         }
 
         val result = mutableListOf<Block>()
         val lines = text.split("\n")
+        var chunkLoopCount = 0
 
         for (i in lines.indices) {
             val line = lines[i]
@@ -41,6 +51,7 @@ class SimperiumSyncAdapter {
             } else {
                 var offset = 0
                 while (offset < line.length) {
+                    chunkLoopCount++
                     val remaining = line.length - offset
                     if (remaining <= BlockEditorConfig.MAX_BLOCK_LENGTH) {
                         val chunkText = line.substring(offset)
@@ -72,21 +83,25 @@ class SimperiumSyncAdapter {
             }
         }
 
+        val durationMs = (System.nanoTime() - t0) / 1_000_000.0
+        Log.d(TAG, "[parseToBlocks] Thread: ${Thread.currentThread().name} | Input Chars: ${text.length} | Lines: ${lines.size} | Created Blocks: ${result.size} | Chunk Loops: $chunkLoopCount | Duration: ${String.format("%.3f", durationMs)} ms")
         return result
     }
 
-    /**
-     * Optimized Block-level Reconcile with Prefix-Suffix Trimming + 1D Rolling Array LCS.
-     * Reduces computation time from O(N * M) down to O(K * M) where K is the number of edited blocks.
-     * Saves 99.8% Heap memory by using a 1D rolling array instead of a 2D matrix.
-     */
     fun reconcileRemoteContent(
         localBlocks: MutableList<Block>,
         remoteText: String,
         activeFocusedBlockId: String?
     ): Boolean {
+        val t0 = System.nanoTime()
+        val threadName = Thread.currentThread().name
+        val initialLocalSize = localBlocks.size
+
         val localText = serializeBlocks(localBlocks)
-        if (localText == remoteText) return false
+        if (localText == remoteText) {
+            Log.d(TAG, "[reconcileRemoteContent] Thread: $threadName | EARLY EXIT: localText == remoteText | Local Blocks: $initialLocalSize")
+            return false
+        }
 
         val remoteBlocks = parseToBlocks(remoteText)
         val hasUnsyncedEdits = localBlocks.any { it.content != it.baseContent }
@@ -94,6 +109,8 @@ class SimperiumSyncAdapter {
         if (!hasUnsyncedEdits) {
             localBlocks.clear()
             localBlocks.addAll(remoteBlocks)
+            val durationMs = (System.nanoTime() - t0) / 1_000_000.0
+            Log.d(TAG, "[reconcileRemoteContent] Thread: $threadName | FAST REPLACEMENT (!hasUnsyncedEdits) | Local Blocks: $initialLocalSize -> ${localBlocks.size} | Duration: ${String.format("%.3f", durationMs)} ms")
             return true
         }
 
@@ -120,7 +137,11 @@ class SimperiumSyncAdapter {
         val subLocal = localBlocks.subList(start, endLocal + 1)
         val subRemote = remoteBlocks.subList(start, endRemote + 1)
 
+        Log.d(TAG, "[reconcileRemoteContent] Thread: $threadName | TRIMMING COMPLETE | Trimmed Prefix: $start | Trimmed Suffix Local: ${localBlocks.lastIndex - endLocal} | SubLocal Size: ${subLocal.size} | SubRemote Size: ${subRemote.size}")
+
         if (subLocal.isEmpty() && subRemote.isEmpty()) {
+            val durationMs = (System.nanoTime() - t0) / 1_000_000.0
+            Log.d(TAG, "[reconcileRemoteContent] Thread: $threadName | NO CHANGE AFTER TRIMMING | Duration: ${String.format("%.3f", durationMs)} ms")
             return false
         }
 
@@ -136,13 +157,17 @@ class SimperiumSyncAdapter {
                 localBlock.baseContent = remoteBlock.content
                 localBlock.hasTrailingNewline = remoteBlock.hasTrailingNewline
             }
+            val durationMs = (System.nanoTime() - t0) / 1_000_000.0
+            Log.d(TAG, "[reconcileRemoteContent] Thread: $threadName | FAST-PATH SINGLE BLOCK EDIT | Duration: ${String.format("%.3f", durationMs)} ms")
             return true
         }
 
-        // Step 4: 1D Rolling Array LCS on the trimmed sub-matrix
+        // Step 4: 1D / 2D LCS on the trimmed sub-matrix
         val lcsMatrix = Array(subLocal.size + 1) { IntArray(subRemote.size + 1) }
+        var lcsCellIterations = 0
         for (i in subLocal.indices) {
             for (j in subRemote.indices) {
+                lcsCellIterations++
                 if (subLocal[i].baseContent == subRemote[j].baseContent ||
                     subLocal[i].content == subRemote[j].content
                 ) {
@@ -213,7 +238,6 @@ class SimperiumSyncAdapter {
             remoteIdx++
         }
 
-        // Reconstruct localBlocks with trimmed reconciledSub
         val fullResult = mutableListOf<Block>()
         fullResult.addAll(localBlocks.subList(0, start))
         fullResult.addAll(reconciledSub)
@@ -223,6 +247,9 @@ class SimperiumSyncAdapter {
 
         localBlocks.clear()
         localBlocks.addAll(fullResult)
+
+        val durationMs = (System.nanoTime() - t0) / 1_000_000.0
+        Log.d(TAG, "[reconcileRemoteContent] Thread: $threadName | FULL RECONCILE FINISHED | LCS Matrix Cells: $lcsCellIterations | Result Blocks: ${localBlocks.size} | Duration: ${String.format("%.3f", durationMs)} ms")
         return true
     }
 
