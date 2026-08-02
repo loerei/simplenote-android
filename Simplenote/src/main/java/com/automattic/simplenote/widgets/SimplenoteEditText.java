@@ -34,6 +34,8 @@ import com.automattic.simplenote.utils.DrawableUtils;
 import com.automattic.simplenote.utils.LinkTokenizer;
 import com.automattic.simplenote.utils.SimplenoteLinkify;
 import com.automattic.simplenote.utils.ThemeUtils;
+import com.automattic.simplenote.utils.TypingTracer;
+import android.graphics.Canvas;
 import com.simperium.client.Bucket;
 
 import java.util.ArrayList;
@@ -115,6 +117,11 @@ public class SimplenoteEditText extends AppCompatMultiAutoCompleteTextView imple
         setOnItemClickListener(this);
         setTokenizer(mTokenizer);
         setThreshold(1);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE);
+            setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE);
+        }
     }
 
     private boolean shouldOverridePredictiveTextBehavior() {
@@ -153,6 +160,27 @@ public class SimplenoteEditText extends AppCompatMultiAutoCompleteTextView imple
         int start = Math.max(getSelectionStart(), 0);
         int end = Math.max(getSelectionEnd(), 0);
         getEditableText().replace(Math.min(start, end), Math.max(start, end), text, 0, text.length());
+    }
+
+    @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        TypingTracer.mark("SimplenoteEditText.onMeasure Start");
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+        TypingTracer.mark("SimplenoteEditText.onMeasure End");
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        TypingTracer.mark("SimplenoteEditText.onLayout Start");
+        super.onLayout(changed, left, top, right, bottom);
+        TypingTracer.mark("SimplenoteEditText.onLayout End");
+    }
+
+    @Override
+    protected void onDraw(Canvas canvas) {
+        TypingTracer.mark("SimplenoteEditText.onDraw Start");
+        super.onDraw(canvas);
+        TypingTracer.mark("SimplenoteEditText.onDraw End");
     }
 
     @Override
@@ -388,7 +416,26 @@ public class SimplenoteEditText extends AppCompatMultiAutoCompleteTextView imple
 
 
     public void processChecklists() {
-        if (getText().length() == 0 || getContext() == null) {
+        processChecklists(0, getText() != null ? getText().length() : 0);
+    }
+
+    public void processChecklists(int start, int count) {
+        if (getText() == null || getText().length() == 0 || getContext() == null) {
+            return;
+        }
+
+        Editable editable = getText();
+        int safeStart = Math.max(0, Math.min(start, editable.length()));
+        int safeEnd = Math.max(0, Math.min(start + count, editable.length()));
+
+        String textStr = editable.toString();
+        int paraStart = textStr.lastIndexOf('\n', safeStart - 1);
+        paraStart = (paraStart == -1) ? 0 : paraStart + 1;
+        int paraEnd = textStr.indexOf('\n', safeEnd);
+        paraEnd = (paraEnd == -1) ? editable.length() : paraEnd;
+
+        CharSequence editWindow = editable.subSequence(paraStart, paraEnd);
+        if (!editWindow.toString().contains("[")) {
             return;
         }
 

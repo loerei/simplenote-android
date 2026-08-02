@@ -10,6 +10,7 @@ import android.text.style.ImageSpan;
 import androidx.annotation.NonNull;
 
 import com.automattic.simplenote.utils.DisplayUtils;
+import com.automattic.simplenote.utils.TypingTracer;
 
 // From https://stackoverflow.com/a/38788432/309558
 
@@ -45,7 +46,7 @@ public class CenteredImageSpan extends ImageSpan {
     @Override
     public void draw(@NonNull Canvas canvas, CharSequence text, int start, int end,
                      float x, int top, int y, int bottom, @NonNull Paint paint) {
-
+        long t0 = System.nanoTime();
         Drawable drawable = getDrawable();
         Rect rect = drawable.getBounds();
         canvas.save();
@@ -57,5 +58,7 @@ public class CenteredImageSpan extends ImageSpan {
         canvas.translate(x, transY);
         drawable.draw(canvas);
         canvas.restore();
+        long dt = System.nanoTime() - t0;
+        TypingTracer.recordSpanDraw("CenteredImageSpan", dt);
     }
 }

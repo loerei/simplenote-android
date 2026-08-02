@@ -24,34 +24,22 @@
             android:paddingEnd="@dimen/padding_extra_large"
             android:paddingStart="@dimen/padding_extra_large">
 
-            <androidx.core.widget.NestedScrollView
-                android:fillViewport="true"
+            <FrameLayout
                 android:layout_height="0dp"
                 android:layout_weight="1"
                 android:layout_width="match_parent">
 
-                <com.automattic.simplenote.widgets.SimplenoteEditText
-                    android:id="@+id/note_content"
-                    android:background="@null"
-                    android:fontFamily="?attr/styleFontFamily"
-                    android:gravity="top"
-                    android:inputType="textMultiLine|textCapSentences|textAutoCorrect"
-                    android:layout_height="match_parent"
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/block_note_recycler"
                     android:layout_width="match_parent"
-                    android:lineSpacingExtra="@dimen/line_spacing"
-                    android:lineSpacingMultiplier="1.0"
-                    android:maxLength="999999999"
-                    android:nextFocusDown="@id/tag_input"
-                    android:nextFocusForward="@id/tag_input"
-                    android:paddingBottom="@dimen/padding_extra_extra_large"
+                    android:layout_height="match_parent"
+                    android:clipToPadding="false"
                     android:paddingTop="@dimen/padding_extra_extra_large"
-                    android:scrollHorizontally="false"
-                    android:textColor="?attr/noteEditorTextColor"
-                    android:textColorLink="?attr/colorAccent"
-                    android:imeOptions="flagNoExtractUi"
-                    tools:context=".NoteEditorFragment"/>
+                    android:paddingBottom="@dimen/padding_extra_extra_large"
+                    android:scrollbars="vertical"
+                    tools:context=".NoteEditorFragment" />
 
-            </androidx.core.widget.NestedScrollView>
+            </FrameLayout>
 
             <HorizontalScrollView
                 android:id="@+id/horizontal_scroll_view"

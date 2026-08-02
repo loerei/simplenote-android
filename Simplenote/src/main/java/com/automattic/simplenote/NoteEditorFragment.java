@@ -64,6 +64,12 @@ import androidx.lifecycle.ViewModelProvider;
 import androidx.preference.PreferenceManager;
 
 import com.automattic.simplenote.analytics.AnalyticsTracker;
+import com.automattic.simplenote.adapters.BlockNoteAdapter;
+import com.automattic.simplenote.utils.BlockPositionMapper;
+import com.automattic.simplenote.utils.SimperiumSyncAdapter;
+import com.automattic.simplenote.widgets.CrossBlockSelectionManager;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 import com.automattic.simplenote.models.Note;
 import com.automattic.simplenote.models.Tag;
 import com.automattic.simplenote.utils.AppLog;
@@ -85,6 +91,7 @@ import com.automattic.simplenote.utils.TagsMultiAutoCompleteTextView.OnTagAddedL
 import com.automattic.simplenote.utils.TextHighlighter;
 import com.automattic.simplenote.utils.SystemBarUtils;
 import com.automattic.simplenote.utils.ThemeUtils;
+import com.automattic.simplenote.utils.TypingTracer;
 import com.automattic.simplenote.utils.WidgetUtils;
 import com.automattic.simplenote.viewmodels.NoteEditorViewModel;
 import com.automattic.simplenote.widgets.SimplenoteEditText;
@@ -127,6 +134,11 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
     private static final int PUBLISH_TIMEOUT = 20000;
     private static final int HISTORY_TIMEOUT = 10000;
     private Note mNote;
+    private RecyclerView mBlockRecyclerView;
+    private BlockNoteAdapter mBlockAdapter;
+    private BlockPositionMapper mBlockPositionMapper;
+    private SimperiumSyncAdapter mSimperiumSyncAdapter;
+    private CrossBlockSelectionManager mSelectionManager;
     private final Runnable mAutoSaveRunnable = this::saveAndSyncNote;
     private Bucket<Note> mNotesBucket;
     private View mRootView;
@@ -435,28 +447,42 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
     public View onCreateView(@NonNull LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
         mRootView = inflater.inflate(R.layout.fragment_note_editor, container, false);
         mContentEditText = mRootView.findViewById(R.id.note_content);
+        mBlockRecyclerView = mRootView.findViewById(R.id.block_note_recycler);
+        if (mBlockRecyclerView != null) {
+            mBlockPositionMapper = new BlockPositionMapper();
+            mSimperiumSyncAdapter = new SimperiumSyncAdapter();
+            mBlockAdapter = new BlockNoteAdapter(new java.util.ArrayList<>(), () -> {
+                saveAndSyncNote();
+                return null;
+            });
+            mBlockRecyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
+            mBlockRecyclerView.setAdapter(mBlockAdapter);
+            mSelectionManager = new CrossBlockSelectionManager(mBlockRecyclerView, mBlockAdapter, mBlockPositionMapper);
+            mSelectionManager.attach();
+        }
         // DODROID-884: don't persist the (potentially huge) note body in saved instance
         // state — it overflows the binder transaction limit on activityStopped. The content
         // is restored from Simperium (mNote.getContent()) on resume, so view-state text is
         // redundant.
-        mContentEditText.setSaveEnabled(false);
-        // DODROID-884: stop feeding the body to ContentCapture, which on Pixel devices
-        // overflows the on-device "Play Protect" service (com.google.android.odad) for
-        // large notes.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            mContentEditText.setImportantForContentCapture(View.IMPORTANT_FOR_CONTENT_CAPTURE_NO);
+        if (mContentEditText != null) {
+            mContentEditText.setSaveEnabled(false);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                mContentEditText.setImportantForContentCapture(View.IMPORTANT_FOR_CONTENT_CAPTURE_NO);
+            }
         }
         if (savedInstanceState != null) {
             mRestoreCursorPosition = savedInstanceState.getInt(STATE_CURSOR_POSITION, -1);
             mRestoreContentFocus = savedInstanceState.getBoolean(STATE_CONTENT_HAS_FOCUS, false);
         }
-        mContentEditText.addOnSelectionChangedListener(this);
-        mContentEditText.setOnCheckboxToggledListener(this);
-        mContentEditText.setMovementMethod(SimplenoteMovementMethod.getInstance());
-        mContentEditText.setOnFocusChangeListener(this);
-        mContentEditText.setTextSize(TypedValue.COMPLEX_UNIT_SP, PrefUtils.getFontSize(requireContext()));
-        mContentEditText.setDropDownBackgroundResource(R.drawable.bg_list_popup);
-        mContentEditText.setAdapter(mLinkAutocompleteAdapter);
+        if (mContentEditText != null) {
+            mContentEditText.addOnSelectionChangedListener(this);
+            mContentEditText.setOnCheckboxToggledListener(this);
+            mContentEditText.setMovementMethod(SimplenoteMovementMethod.getInstance());
+            mContentEditText.setOnFocusChangeListener(this);
+            mContentEditText.setTextSize(TypedValue.COMPLEX_UNIT_SP, PrefUtils.getFontSize(requireContext()));
+            mContentEditText.setDropDownBackgroundResource(R.drawable.bg_list_popup);
+            mContentEditText.setAdapter(mLinkAutocompleteAdapter);
+        }
         mTagInput = mRootView.findViewById(R.id.tag_input);
         mTagInput.setBucketTag(((Simplenote) requireActivity().getApplication()).getTagsBucket());
         mTagInput.setDropDownBackgroundResource(R.drawable.bg_list_popup);
@@ -689,7 +715,18 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
 
             InputMethodManager inputMethodManager = (InputMethodManager) getActivity().getSystemService(Context.INPUT_METHOD_SERVICE);
             if (inputMethodManager != null) {
-                inputMethodManager.showSoftInput(mContentEditText, 0);
+                View targetView = mContentEditText;
+                if (targetView == null && mBlockRecyclerView != null && mBlockAdapter != null && mBlockAdapter.getItemCount() > 0) {
+                    mBlockAdapter.focusBlock(0, 0);
+                    RecyclerView.ViewHolder vh = mBlockRecyclerView.findViewHolderForAdapterPosition(0);
+                    if (vh instanceof BlockNoteAdapter.BlockViewHolder) {
+                        targetView = ((BlockNoteAdapter.BlockViewHolder) vh).getEditText();
+                    }
+                }
+                if (targetView != null) {
+                    targetView.requestFocus();
+                    inputMethodManager.showSoftInput(targetView, 0);
+                }
             }
         }, 100);
     }
@@ -970,7 +1007,7 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
 
     public void shareNote() {
         if (mNote != null) {
-            mContentEditText.clearFocus();
+            if (mContentEditText != null) mContentEditText.clearFocus();
             showShareSheet();
             AnalyticsTracker.track(
                 EDITOR_NOTE_CONTENT_SHARED,
@@ -982,7 +1019,7 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
 
     public void showHistory() {
         if (mNote != null && mNote.getVersion() > 1) {
-            mContentEditText.clearFocus();
+            if (mContentEditText != null) mContentEditText.clearFocus();
             mHistoryTimeoutHandler.postDelayed(mHistoryTimeoutRunnable, HISTORY_TIMEOUT);
             showHistorySheet();
         } else {
@@ -994,7 +1031,7 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
         DrawableUtils.startAnimatedVectorDrawable(mInformationMenuItem.getIcon());
 
         if (mNote != null) {
-            mContentEditText.clearFocus();
+            if (mContentEditText != null) mContentEditText.clearFocus();
             saveNote();
             showInfoSheet();
         }
@@ -1074,14 +1111,30 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
     private void refreshContent(boolean isNoteUpdate) {
         if (mNote != null) {
             // Restore the cursor position if possible.
-            int cursorPosition = newCursorLocation(mNote.getContent(), getNoteContentString(), mContentEditText.getSelectionEnd());
-            mContentEditText.setText(mNote.getContent());
+            int currentSelection = (mContentEditText != null) ? mContentEditText.getSelectionEnd() : 0;
+            int cursorPosition = newCursorLocation(mNote.getContent(), getNoteContentString(), currentSelection);
+            if (mBlockAdapter != null) {
+                if (isNoteUpdate) {
+                    boolean changed = mSimperiumSyncAdapter.reconcileRemoteContent(
+                        mBlockAdapter.getBlocks(),
+                        mNote.getContent(),
+                        mBlockAdapter.getActiveFocusedBlockId()
+                    );
+                    if (changed) {
+                        mBlockAdapter.notifyDataSetChanged();
+                    }
+                } else {
+                    mBlockAdapter.setBlocks(mSimperiumSyncAdapter.parseToBlocks(mNote.getContent()));
+                }
+            } else if (mContentEditText != null) {
+                mContentEditText.setText(mNote.getContent());
+            }
             // Set the scroll position after the note's content has been rendered
             mRootView.post(this::setScroll);
 
             // DODROID-884: restore the cursor position persisted across activity recreation,
             // since the EditText no longer saves its own instance state.
-            if (mRestoreCursorPosition >= 0) {
+            if (mContentEditText != null && mRestoreCursorPosition >= 0) {
                 if (mRestoreContentFocus) {
                     mContentEditText.requestFocus();
                 }
@@ -1108,15 +1161,17 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
                 // Update overflow popup menu.
                 requireActivity().invalidateOptionsMenu();
 
-                if (mContentEditText.hasFocus()
+                if (mContentEditText != null && mContentEditText.hasFocus()
                         && cursorPosition != mContentEditText.getSelectionEnd()
                         && cursorPosition < mContentEditText.getText().length()) {
                     mContentEditText.setSelection(cursorPosition);
                 }
             }
 
-            afterTextChanged(mContentEditText.getText());
-            mContentEditText.processChecklists();
+            if (mContentEditText != null) {
+                afterTextChanged(mContentEditText.getText());
+                mContentEditText.processChecklists();
+            }
             viewModel.update(mNote);
         }
     }
@@ -1182,13 +1237,24 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
 
     @Override
     public void afterTextChanged(Editable editable) {
+        TypingTracer.mark("afterTextChanged Start");
+        if (editable != null) {
+            Object[] allSpans = editable.getSpans(0, editable.length(), Object.class);
+            TypingTracer.mark("Total Doc Spans: " + (allSpans != null ? allSpans.length : 0));
+        }
         attemptAutoList(editable);
+        TypingTracer.mark("After attemptAutoList");
         setTitleSpan(editable);
-        mContentEditText.fixLineSpacing();
+        TypingTracer.mark("After setTitleSpan");
+        TypingTracer.finishAndCopyToClipboard(getContext(), mContentEditText);
     }
 
     @Override
     public void onTextChanged(CharSequence charSequence, int start, int before, int count) {
+        String typedChar = (count > 0 && start + count <= charSequence.length()) ? charSequence.subSequence(start, start + count).toString() : "";
+        TypingTracer.start(typedChar, start + count);
+        TypingTracer.mark("onTextChanged Start");
+
         // When text changes, start timer that will fire after AUTOSAVE_DELAY_MILLIS passes
         if (mAutoSaveHandler != null) {
             mAutoSaveHandler.removeCallbacks(mAutoSaveRunnable);
@@ -1207,7 +1273,9 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
 
         // Temporarily remove the text watcher as we process checklists to prevent callback looping
         mContentEditText.removeTextChangedListener(this);
-        mContentEditText.processChecklists();
+        TypingTracer.mark("Before processChecklists");
+        mContentEditText.processChecklists(start, count);
+        TypingTracer.mark("After processChecklists");
         mContentEditText.addTextChangedListener(this);
     }
 
@@ -1219,19 +1287,25 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
      * spans are removed when {@link MetricAffectingSpan} is removed.
      */
     private void setTitleSpan(Editable editable) {
-        for (MetricAffectingSpan span : editable.getSpans(0, editable.length(), MetricAffectingSpan.class)) {
-            if (span instanceof RelativeSizeSpan || span instanceof StyleSpan) {
-                editable.removeSpan(span);
-            }
+        if (editable == null || editable.length() == 0) {
+            return;
         }
 
-        int newLinePosition = getNoteContentString().indexOf("\n");
-
+        String textStr = editable.toString();
+        int newLinePosition = textStr.indexOf('\n');
         if (newLinePosition == 0) {
             return;
         }
 
         int titleEndPosition = (newLinePosition > 0) ? newLinePosition : editable.length();
+        int scanEnd = Math.min(editable.length(), titleEndPosition + 1);
+
+        for (MetricAffectingSpan span : editable.getSpans(0, scanEnd, MetricAffectingSpan.class)) {
+            if (span instanceof RelativeSizeSpan || span instanceof StyleSpan) {
+                editable.removeSpan(span);
+            }
+        }
+
         editable.setSpan(new RelativeSizeSpan(1.3f), 0, titleEndPosition, Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
         editable.setSpan(new StyleSpan(Typeface.BOLD), 0, titleEndPosition, Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
     }
@@ -1298,7 +1372,7 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
         NoteEditorActivity activity = (NoteEditorActivity)  requireActivity();
         int displayMode = getResources().getConfiguration().orientation;
 
-        if (mContentEditText.hasFocus() &&
+        if (mContentEditText != null && mContentEditText.hasFocus() &&
                 displayMode == Configuration.ORIENTATION_LANDSCAPE &&
                 !activity.isPreviewTabSelected()) {
             if (mNote.isMarkdownEnabled()) {
@@ -1394,7 +1468,11 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
 
     @Override
     public void onHistoryCancelClicked() {
-        mContentEditText.setText(mNote.getContent());
+        if (mBlockAdapter != null) {
+            mBlockAdapter.setBlocks(mSimperiumSyncAdapter.parseToBlocks(mNote.getContent()));
+        } else {
+            mContentEditText.setText(mNote.getContent());
+        }
         if (mHistoryBottomSheet != null) {
             mHistoryBottomSheet.dismiss();
         }
@@ -1411,7 +1489,11 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
     @Override
     public void onHistoryDismissed() {
         if (!mHistoryBottomSheet.didTapOnButton()) {
-            mContentEditText.setText(mNote.getContent());
+            if (mBlockAdapter != null) {
+                mBlockAdapter.setBlocks(mSimperiumSyncAdapter.parseToBlocks(mNote.getContent()));
+            } else {
+                mContentEditText.setText(mNote.getContent());
+            }
         }
 
         if (mHistoryTimeoutHandler != null) {
@@ -1421,7 +1503,11 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
 
     @Override
     public void onHistoryUpdateNote(String content) {
-        mContentEditText.setText(content);
+        if (mBlockAdapter != null) {
+            mBlockAdapter.setBlocks(mSimperiumSyncAdapter.parseToBlocks(content));
+        } else {
+            mContentEditText.setText(content);
+        }
     }
 
     private void saveNote() {
@@ -1434,7 +1520,9 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
                 mIsPreviewEnabled = mNote.isPreviewEnabled();
             }
 
-            String content = mContentEditText.getPlainTextContent();
+            String content = (mBlockAdapter != null) ?
+                mSimperiumSyncAdapter.serializeBlocks(mBlockAdapter.getBlocks()) :
+                (mContentEditText != null ? mContentEditText.getPlainTextContent() : "");
 
             if (mNote.hasChanges(content, mNote.isPinned(), mIsMarkdownEnabled, mIsPreviewEnabled)) {
                 mNote.setContent(content);
@@ -1726,7 +1814,11 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
         if (openNote == null || !openNote.getSimperiumKey().equals(note.getSimperiumKey()))
             return;
 
-        note.setContent(mContentEditText.getPlainTextContent());
+        if (mBlockAdapter != null) {
+            note.setContent(mSimperiumSyncAdapter.serializeBlocks(mBlockAdapter.getBlocks()));
+        } else if (mContentEditText != null) {
+            note.setContent(mContentEditText.getPlainTextContent());
+        }
     }
 
     @Override
@@ -1751,7 +1843,9 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
             NoteEditorFragment fragment = mNoteEditorFragmentReference.get();
 
             if (fragment != null) {
-                fragment.mContentEditText.removeTextChangedListener(fragment);
+                if (fragment.mContentEditText != null) {
+                    fragment.mContentEditText.removeTextChangedListener(fragment);
+                }
                 fragment.mIsLoadingNote = true;
             }
         }
@@ -1819,23 +1913,25 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
                 fragment.mHighlighter.highlightMatches(fragment.mMatchOffsets, columnIndex);
             }
 
-            fragment.mContentEditText.addTextChangedListener(fragment);
+            if (fragment.mContentEditText != null) {
+                fragment.mContentEditText.addTextChangedListener(fragment);
 
-            if (fragment.mNote != null && fragment.mNote.getContent().isEmpty()) {
-                // Show soft keyboard
-                fragment.mContentEditText.requestFocus();
+                if (fragment.mNote != null && fragment.mNote.getContent().isEmpty()) {
+                    // Show soft keyboard
+                    fragment.mContentEditText.requestFocus();
 
-                new Handler().postDelayed(() -> {
-                    if (fragment.getActivity() == null) {
-                        return;
-                    }
+                    new Handler().postDelayed(() -> {
+                        if (fragment.getActivity() == null) {
+                            return;
+                        }
 
-                    InputMethodManager inputMethodManager = (InputMethodManager) fragment.getActivity().getSystemService(Context.INPUT_METHOD_SERVICE);
+                        InputMethodManager inputMethodManager = (InputMethodManager) fragment.getActivity().getSystemService(Context.INPUT_METHOD_SERVICE);
 
-                    if (inputMethodManager != null) {
-                        inputMethodManager.showSoftInput(fragment.mContentEditText, 0);
-                    }
-                }, 100);
+                        if (inputMethodManager != null) {
+                            inputMethodManager.showSoftInput(fragment.mContentEditText, 0);
+                        }
+                    }, 100);
+                }
             } else if (fragment.mNote != null) {
                 // If we have a valid note, hide the placeholder
                 fragment.setPlaceholderVisible(false);

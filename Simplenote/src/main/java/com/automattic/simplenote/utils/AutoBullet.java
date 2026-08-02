@@ -20,14 +20,15 @@ public class AutoBullet {
             return;
         }
 
-        String noteContent = editable.toString();
-        String prevChar = noteContent.substring(newCursorPosition - 1, newCursorPosition);
+        if (editable.charAt(newCursorPosition - 1) != '\n') {
+            return;
+        }
 
-        if (prevChar.equals(STR_LINE_BREAK)) {
-            int prevParagraphEnd = newCursorPosition - 1;
-            int prevParagraphStart = noteContent.lastIndexOf(STR_LINE_BREAK, prevParagraphEnd - 1);
-            prevParagraphStart++; // ++ because we don't actually include the previous linebreak
-            String prevParagraph = noteContent.substring(prevParagraphStart, prevParagraphEnd);
+        int prevParagraphEnd = newCursorPosition - 1;
+        String noteContent = editable.toString();
+        int prevParagraphStart = noteContent.lastIndexOf(STR_LINE_BREAK, prevParagraphEnd - 1);
+        prevParagraphStart = (prevParagraphStart == -1) ? 0 : prevParagraphStart + 1;
+        String prevParagraph = noteContent.substring(prevParagraphStart, prevParagraphEnd);
             BulletMetadata metadata = extractBulletMetadata(prevParagraph);
             // See if there's a CheckableSpan in the previous line
             CheckableSpan[] checkableSpans = editable.getSpans(prevParagraphStart, prevParagraphEnd, CheckableSpan.class);
@@ -52,7 +53,6 @@ public class AutoBullet {
                     editable.replace(prevParagraphStart, newCursorPosition, "");
                 }
             }
-        }
     }
 
     private static boolean isValidCursorIncrement(int oldCursorPosition, int newCursorPosition) {
