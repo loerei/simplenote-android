@@ -39,6 +39,58 @@ class BlockNoteAdapter(
 
     var attachedRecyclerView: RecyclerView? = null
 
+    // DYNAMIC ACCELERATION VELOCITY TRACKER FOR CROSS-BLOCK CONTINUOUS DELETE
+    var lastDeleteTimestamp: Long = 0L
+    var lastMeasuredDeleteIntervalMs: Long = 54L
+    private var activeBridgeRunnable: Runnable? = null
+
+    private fun updateDeleteVelocityTracker() {
+        val now = System.currentTimeMillis()
+        if (lastDeleteTimestamp > 0L) {
+            val delta = now - lastDeleteTimestamp
+            if (delta in 20L..200L) {
+                lastMeasuredDeleteIntervalMs = delta
+            }
+        }
+        lastDeleteTimestamp = now
+    }
+
+    private fun checkAndBridgeContinuousDelete(targetPos: Int, startOffset: Int) {
+        val now = System.currentTimeMillis()
+        val isUserHoldingDelete = (now - lastDeleteTimestamp) <= 180L
+
+        if (isUserHoldingDelete && targetPos in blocks.indices && startOffset > 0) {
+            activeBridgeRunnable?.let { mainHandler.removeCallbacks(it) }
+            val interval = lastMeasuredDeleteIntervalMs.coerceIn(25L, 100L)
+            Log.d(TAG_CURSOR, "[CONTINUOUS_DELETE_BRIDGE] Triggered for Pos: $targetPos | StartOffset: $startOffset | MeasuredInterval: ${interval}ms")
+
+            val runnable = object : Runnable {
+                override fun run() {
+                    val currentNow = System.currentTimeMillis()
+                    if ((currentNow - lastDeleteTimestamp) <= 250L && targetPos in blocks.indices) {
+                        val block = blocks[targetPos]
+                        val vh = attachedRecyclerView?.findViewHolderForAdapterPosition(targetPos) as? BlockViewHolder
+                        if (vh != null && vh.editText.selectionStart > 0) {
+                            val currentSel = vh.editText.selectionStart
+                            val editable = vh.editText.text
+                            if (editable != null && currentSel <= editable.length && currentSel > 0) {
+                                editable.delete(currentSel - 1, currentSel)
+                                block.content = editable.toString()
+                                block.baseContent = block.content
+                                vh.editText.setSelection(currentSel - 1)
+                                lastDeleteTimestamp = System.currentTimeMillis()
+                                Log.d(TAG_CURSOR, "[CONTINUOUS_DELETE_BRIDGE] Bridged 1 char delete at Pos: $targetPos | NewOffset: ${currentSel - 1}")
+                                mainHandler.postDelayed(this, interval)
+                            }
+                        }
+                    }
+                }
+            }
+            activeBridgeRunnable = runnable
+            mainHandler.postDelayed(runnable, interval)
+        }
+    }
+
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
         super.onAttachedToRecyclerView(recyclerView)
         recyclerView.itemAnimator = null
@@ -233,37 +285,39 @@ class BlockNoteAdapter(
             }
 
             onKeyListener = View.OnKeyListener { _, keyCode, event ->
-                if (event.action != KeyEvent.ACTION_DOWN) return@OnKeyListener false
                 val pos = adapterPosition
                 if (pos == RecyclerView.NO_POSITION || pos !in blocks.indices) return@OnKeyListener false
 
-                val selectionStart = editText.selectionStart
-                val selectionEnd = editText.selectionEnd
+                if (keyCode == KeyEvent.KEYCODE_DEL) {
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        updateDeleteVelocityTracker()
+                    }
+                    val selectionStart = editText.selectionStart
+                    val selectionEnd = editText.selectionEnd
 
-                when (keyCode) {
-                    KeyEvent.KEYCODE_ENTER -> {
+                    Log.d(TAG_CURSOR, "[EVENT_KEY_DEL] Action: ${event.action} | Pos: $pos | SelStart: $selectionStart | SelEnd: $selectionEnd | TextLen: ${editText.text.length}")
+
+                    if (event.action == KeyEvent.ACTION_DOWN && selectionStart == 0 && selectionEnd == 0 && pos > 0) {
                         finishImeComposition()
-                        handleEnterKey(pos, selectionStart, selectionEnd)
+                        handleBackspaceAtStart(pos)
                         true
-                    }
-                    KeyEvent.KEYCODE_DEL -> {
-                        Log.d(TAG_CURSOR, "[EVENT_KEY_DEL] Pos: $pos | SelStart: $selectionStart | SelEnd: $selectionEnd | TextLen: ${editText.text.length} | BlockContent: '${blocks[pos].content}'")
-                        if (selectionStart == 0 && selectionEnd == 0 && pos > 0) {
-                            finishImeComposition()
-                            handleBackspaceAtStart(pos)
-                            true
-                        } else false
-                    }
-                    KeyEvent.KEYCODE_FORWARD_DEL -> {
-                        val len = editText.text.length
-                        if (selectionStart == len && selectionEnd == len && pos < blocks.size - 1) {
-                            finishImeComposition()
-                            handleForwardDeleteAtEnd(pos)
-                            true
-                        } else false
-                    }
-                    else -> false
-                }
+                    } else false
+                } else if (keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN) {
+                    val selectionStart = editText.selectionStart
+                    val selectionEnd = editText.selectionEnd
+                    finishImeComposition()
+                    handleEnterKey(pos, selectionStart, selectionEnd)
+                    true
+                } else if (keyCode == KeyEvent.KEYCODE_FORWARD_DEL && event.action == KeyEvent.ACTION_DOWN) {
+                    val selectionStart = editText.selectionStart
+                    val selectionEnd = editText.selectionEnd
+                    val len = editText.text.length
+                    if (selectionStart == len && selectionEnd == len && pos < blocks.size - 1) {
+                        finishImeComposition()
+                        handleForwardDeleteAtEnd(pos)
+                        true
+                    } else false
+                } else false
             }
             editText.setOnKeyListener(onKeyListener)
 
@@ -352,6 +406,7 @@ class BlockNoteAdapter(
                 prevBlock.baseContent = prevBlock.content
                 safeNotifyItemChanged(pos - 1)
                 focusBlock(pos - 1, prevBlock.content.length)
+                checkAndBridgeContinuousDelete(pos - 1, prevBlock.content.length)
                 notifyContentChanged()
             }
             return
@@ -379,6 +434,7 @@ class BlockNoteAdapter(
             safeNotifyItemChanged(pos - 1)
             safeNotifyItemRemoved(pos)
             focusBlock(pos - 1, prevLength)
+            checkAndBridgeContinuousDelete(pos - 1, prevLength)
         } else {
             var splitIndex = mergedContent.lastIndexOf(' ', BlockEditorConfig.MAX_BLOCK_LENGTH)
             if (splitIndex <= 0) {
@@ -398,6 +454,7 @@ class BlockNoteAdapter(
             safeNotifyItemChanged(pos - 1)
             safeNotifyItemChanged(pos)
             focusBlock(pos - 1, prevLength.coerceAtMost(firstChunk.length))
+            checkAndBridgeContinuousDelete(pos - 1, prevLength.coerceAtMost(firstChunk.length))
         }
         notifyContentChanged()
     }
