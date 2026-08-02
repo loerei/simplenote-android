@@ -469,18 +469,28 @@ class BlockNoteAdapter(
         val mergedContent = prevBlock.content + currentBlock.content
         val prevLength = prevBlock.content.length
 
-        Log.d(TAG_CURSOR, "[EVENT_MERGE_BACKSPACE] Pos: $pos -> Merging with Pos: ${pos - 1} | PrevContent: '${prevBlock.content}' | CurrentContent: '${currentBlock.content}' | TargetOffset: $prevLength")
+        Log.d(TAG_CURSOR, "[SEAMLESS_BUFFER_SHIFT] Merging Pos: $pos into Active Focused EditText | PrevContent: '${prevBlock.content}' | TargetOffset: $prevLength")
 
         if (mergedContent.length <= BlockEditorConfig.MAX_BLOCK_LENGTH) {
+            val prevContent = prevBlock.content
             prevBlock.content = mergedContent
-            prevBlock.hasTrailingNewline = currentBlock.hasTrailingNewline
             prevBlock.baseContent = mergedContent
+            prevBlock.hasTrailingNewline = currentBlock.hasTrailingNewline
 
             blocks.removeAt(pos)
-            safeNotifyItemChanged(pos - 1)
+            activeFocusedBlockId = prevBlock.id
+            pendingFocusCursorOffset = prevLength
+
+            val prevVh = attachedRecyclerView?.findViewHolderForAdapterPosition(pos - 1) as? BlockViewHolder
+            if (prevVh != null) {
+                prevVh.editText.setText(mergedContent)
+                prevVh.editText.setSelection(prevLength)
+                prevVh.editText.requestFocus()
+            } else {
+                safeNotifyItemChanged(pos - 1)
+            }
+
             safeNotifyItemRemoved(pos)
-            focusBlock(pos - 1, prevLength)
-            checkAndBridgeContinuousDelete(pos - 1, prevLength)
         } else {
             var splitIndex = mergedContent.lastIndexOf(' ', BlockEditorConfig.MAX_BLOCK_LENGTH)
             if (splitIndex <= 0) {
@@ -500,7 +510,6 @@ class BlockNoteAdapter(
             safeNotifyItemChanged(pos - 1)
             safeNotifyItemChanged(pos)
             focusBlock(pos - 1, prevLength.coerceAtMost(firstChunk.length))
-            checkAndBridgeContinuousDelete(pos - 1, prevLength.coerceAtMost(firstChunk.length))
         }
         notifyContentChanged()
     }
