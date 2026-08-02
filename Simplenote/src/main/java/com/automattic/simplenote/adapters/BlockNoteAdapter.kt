@@ -30,8 +30,6 @@ class BlockNoteAdapter(
     companion object {
         private const val TAG = "SIMPLENOTE_PERF_ADAPTER"
         private const val TAG_CURSOR = "SIMPLENOTE_PERF_CURSOR"
-        private const val DELETE_KEY_REPEAT_TIMEOUT_MS = 180L
-        private const val MAX_SYNTHETIC_BRIDGE_STEPS = 3
     }
 
     var activeFocusedBlockId: String? = null
@@ -46,16 +44,12 @@ class BlockNoteAdapter(
     var lastDeleteTimestamp: Long = 0L
     var deleteHoldStartTimestamp: Long = 0L
     var lastMergeTimestamp: Long = 0L
-    var remainingSyntheticBridgeSteps: Int = 0
     var lastMeasuredDeleteIntervalMs: Long = 54L
     var lastDeleteChunkSize: Int = 1
     private var activeBridgeRunnable: Runnable? = null
 
     private fun updateDeleteVelocityTracker(pos: Int, selectionStart: Int) {
         val now = System.currentTimeMillis()
-        remainingSyntheticBridgeSteps = 0
-        lastMergeTimestamp = 0L
-
         if (deleteHoldStartTimestamp == 0L) {
             deleteHoldStartTimestamp = now
             Log.d(TAG_CURSOR, "[DELETE_SESSION] Giữ (0.000s) | Pos: $pos | SelStart: $selectionStart")
@@ -74,28 +68,23 @@ class BlockNoteAdapter(
         isDeleteKeyCurrentlyPressed = true
     }
 
-    fun forceStopContinuousDeleteBridge(reason: String = "") {
+    private fun stopContinuousDeleteBridge(pos: Int = -1, selectionStart: Int = -1) {
         val now = System.currentTimeMillis()
-        if (deleteHoldStartTimestamp > 0L) {
-            val elapsedSec = (now - deleteHoldStartTimestamp) / 1000.0
-            Log.d(TAG_CURSOR, "[DELETE_SESSION] Thả (+${String.format("%.3f", elapsedSec)}s) | Reason: $reason")
-            deleteHoldStartTimestamp = 0L
-        }
-        isDeleteKeyCurrentlyPressed = false
-        remainingSyntheticBridgeSteps = 0
-        activeBridgeRunnable?.let { mainHandler.removeCallbacks(it) }
-        activeBridgeRunnable = null
-        lastDeleteTimestamp = 0L
-    }
-
-    private fun stopContinuousDeleteBridge(pos: Int = -1, selectionStart: Int = -1, forceStop: Boolean = false) {
-        val now = System.currentTimeMillis()
-        // Ignore synthetic ACTION_UP sent by Android IME within 150ms of a block merge, UNLESS forceStop is true
-        if (!forceStop && lastMergeTimestamp > 0L && (now - lastMergeTimestamp) <= 150L) {
+        // Ignore synthetic ACTION_UP sent by Android IME within 150ms of a block merge!
+        if (lastMergeTimestamp > 0L && (now - lastMergeTimestamp) <= 150L) {
             Log.d(TAG_CURSOR, "[DELETE_SESSION] Ignored synthetic IME ACTION_UP (+${now - lastMergeTimestamp}ms after merge)")
             return
         }
-        forceStopContinuousDeleteBridge("ACTION_UP at Pos: $pos")
+
+        if (deleteHoldStartTimestamp > 0L) {
+            val elapsedSec = (now - deleteHoldStartTimestamp) / 1000.0
+            Log.d(TAG_CURSOR, "[DELETE_SESSION] Thả (+${String.format("%.3f", elapsedSec)}s) | Pos: $pos | SelStart: $selectionStart")
+            deleteHoldStartTimestamp = 0L
+        }
+        isDeleteKeyCurrentlyPressed = false
+        activeBridgeRunnable?.let { mainHandler.removeCallbacks(it) }
+        activeBridgeRunnable = null
+        lastDeleteTimestamp = 0L
     }
 
     private fun checkAndBridgeContinuousDelete(targetPos: Int, startOffset: Int) {
@@ -104,24 +93,14 @@ class BlockNoteAdapter(
 
         if (isUserHoldingDelete && targetPos in blocks.indices && startOffset > 0) {
             activeBridgeRunnable?.let { mainHandler.removeCallbacks(it) }
-            remainingSyntheticBridgeSteps = MAX_SYNTHETIC_BRIDGE_STEPS
             val interval = lastMeasuredDeleteIntervalMs.coerceIn(25L, 100L)
             val chunkSize = lastDeleteChunkSize.coerceIn(1, 10)
-            Log.d(TAG_CURSOR, "[CONTINUOUS_DELETE_BRIDGE] Triggered for Pos: $targetPos | StartOffset: $startOffset | Interval: ${interval}ms | Budget: $remainingSyntheticBridgeSteps steps")
+            Log.d(TAG_CURSOR, "[CONTINUOUS_DELETE_BRIDGE] Triggered for Pos: $targetPos | StartOffset: $startOffset | Interval: ${interval}ms | ChunkSize: $chunkSize")
 
             val runnable = object : Runnable {
                 override fun run() {
                     val currentNow = System.currentTimeMillis()
-                    val timeSinceLastKey = currentNow - lastDeleteTimestamp
-
-                    // WATCHDOG: If no real keypress for > 180ms AND synthetic budget exhausted
-                    if (timeSinceLastKey > DELETE_KEY_REPEAT_TIMEOUT_MS && remainingSyntheticBridgeSteps <= 0) {
-                        Log.d(TAG_CURSOR, "[CONTINUOUS_DELETE_BRIDGE] Watchdog: Key repeat timeout (${timeSinceLastKey}ms). Stopping deletion.")
-                        forceStopContinuousDeleteBridge("Watchdog key repeat timeout")
-                        return
-                    }
-
-                    if ((isDeleteKeyCurrentlyPressed || remainingSyntheticBridgeSteps > 0) && targetPos in blocks.indices) {
+                    if (isDeleteKeyCurrentlyPressed && targetPos in blocks.indices) {
                         val block = blocks[targetPos]
                         val vh = attachedRecyclerView?.findViewHolderForAdapterPosition(targetPos) as? BlockViewHolder
                         if (vh != null && vh.editText.selectionStart > 0) {
@@ -135,24 +114,12 @@ class BlockNoteAdapter(
                                 vh.editText.setSelection(currentSel - deleteLen)
                                 val elapsedSec = if (deleteHoldStartTimestamp > 0L) (currentNow - deleteHoldStartTimestamp) / 1000.0 else 0.0
                                 Log.d(TAG_CURSOR, "[DELETE_SESSION] Bridge Event (+${String.format("%.3f", elapsedSec)}s) | Pos: $targetPos | NewOffset: ${currentSel - deleteLen}")
-
-                                if (remainingSyntheticBridgeSteps > 0) {
-                                    remainingSyntheticBridgeSteps--
-                                    Log.d(TAG_CURSOR, "[CONTINUOUS_DELETE_BRIDGE] Synthetic step executed. Remaining budget: $remainingSyntheticBridgeSteps")
-                                }
-
-                                if (remainingSyntheticBridgeSteps <= 0 && !isDeleteKeyCurrentlyPressed) {
-                                    Log.d(TAG_CURSOR, "[CONTINUOUS_DELETE_BRIDGE] Synthetic budget exhausted. Auto-stopping bridge.")
-                                    forceStopContinuousDeleteBridge("Budget exhausted")
-                                    return
-                                }
-
                                 mainHandler.postDelayed(this, interval)
                             }
                         }
                     } else {
-                        Log.d(TAG_CURSOR, "[CONTINUOUS_DELETE_BRIDGE] Auto-stopped (User released key or budget exhausted)")
-                        forceStopContinuousDeleteBridge("Budget or press ended")
+                        Log.d(TAG_CURSOR, "[CONTINUOUS_DELETE_BRIDGE] Auto-stopped (User released key or timeout)")
+                        stopContinuousDeleteBridge()
                     }
                 }
             }
@@ -161,28 +128,13 @@ class BlockNoteAdapter(
         }
     }
 
-    private val recyclerViewTouchListener = object : RecyclerView.SimpleOnItemTouchListener() {
-        override fun onInterceptTouchEvent(rv: RecyclerView, e: android.view.MotionEvent): Boolean {
-            when (e.actionMasked) {
-                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL, android.view.MotionEvent.ACTION_POINTER_UP -> {
-                    if (isDeleteKeyCurrentlyPressed || activeBridgeRunnable != null) {
-                        forceStopContinuousDeleteBridge("RecyclerView Touch Released")
-                    }
-                }
-            }
-            return false
-        }
-    }
-
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
         super.onAttachedToRecyclerView(recyclerView)
         recyclerView.itemAnimator = null
         attachedRecyclerView = recyclerView
-        recyclerView.addOnItemTouchListener(recyclerViewTouchListener)
     }
 
     override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
-        attachedRecyclerView?.removeOnItemTouchListener(recyclerViewTouchListener)
         attachedRecyclerView = null
         super.onDetachedFromRecyclerView(recyclerView)
     }
