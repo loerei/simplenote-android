@@ -648,13 +648,17 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
             }
 
             // Calculate how far to scroll to bring the match into view
-            Layout layout = mContentEditText.getLayout();
-            if (layout != null) {
-                int lineTop = layout.getLineTop(layout.getLineForOffset(matchLocation));
-                ((NestedScrollView) mRootView).smoothScrollTo(0, lineTop);
+            if (mContentEditText != null) {
+                Layout layout = mContentEditText.getLayout();
+                if (layout != null && mRootView instanceof NestedScrollView) {
+                    int lineTop = layout.getLineTop(layout.getLineForOffset(matchLocation));
+                    ((NestedScrollView) mRootView).smoothScrollTo(0, lineTop);
+                }
             }
         } else if (mNote != null && mNote.getSimperiumKey() != null) {
-            ((NestedScrollView) mRootView).scrollTo(0, mPreferences.getInt(mNote.getSimperiumKey(), 0));
+            if (mRootView instanceof NestedScrollView) {
+                ((NestedScrollView) mRootView).scrollTo(0, mPreferences.getInt(mNote.getSimperiumKey(), 0));
+            }
             mRootView.setOnScrollChangeListener(
                     (v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
                         if (mNote == null) {
