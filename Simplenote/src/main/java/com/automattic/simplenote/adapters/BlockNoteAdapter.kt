@@ -36,9 +36,17 @@ class BlockNoteAdapter(
     var selectionManager: CrossBlockSelectionManager? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    var attachedRecyclerView: RecyclerView? = null
+
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
         super.onAttachedToRecyclerView(recyclerView)
         recyclerView.itemAnimator = null
+        attachedRecyclerView = recyclerView
+    }
+
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        attachedRecyclerView = null
+        super.onDetachedFromRecyclerView(recyclerView)
     }
 
     fun setBlocks(newBlocks: List<Block>) {
@@ -81,6 +89,18 @@ class BlockNoteAdapter(
             safeNotifyItemChanged(oldPos)
         }
         safeNotifyItemChanged(targetPosition)
+
+        // SYNCHRONOUS FOCUS & CURSOR SELECTION FOR ATTACHED VIEWHOLDER
+        attachedRecyclerView?.let { rv ->
+            val vh = rv.findViewHolderForAdapterPosition(targetPosition) as? BlockViewHolder
+            vh?.let { holder ->
+                holder.editText.requestFocus()
+                val safeOffset = cursorOffset.coerceIn(0, holder.editText.text.length)
+                holder.editText.setSelection(safeOffset)
+                pendingFocusCursorOffset = null
+            }
+        }
+
         val durationMs = (System.nanoTime() - t0) / 1_000_000.0
         Log.d(TAG, "[focusBlock] Thread: ${Thread.currentThread().name} | OldPos: $oldPos -> TargetPos: $targetPosition | CursorOffset: $cursorOffset | Duration: ${String.format("%.3f", durationMs)} ms")
     }
@@ -319,7 +339,7 @@ class BlockNoteAdapter(
         notifyContentChanged()
     }
 
-    private fun handleBackspaceAtStart(pos: Int) {
+    fun handleBackspaceAtStart(pos: Int) {
         val prevBlock = blocks[pos - 1]
         val currentBlock = blocks[pos]
 
