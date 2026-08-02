@@ -40,6 +40,7 @@ class BlockNoteAdapter(
     var attachedRecyclerView: RecyclerView? = null
 
     // DYNAMIC ACCELERATION & CHUNK SIZE TRACKER FOR CROSS-BLOCK CONTINUOUS DELETE
+    var isDeleteKeyCurrentlyPressed: Boolean = false
     var lastDeleteTimestamp: Long = 0L
     var lastMeasuredDeleteIntervalMs: Long = 54L
     var lastDeleteChunkSize: Int = 1
@@ -54,9 +55,11 @@ class BlockNoteAdapter(
             }
         }
         lastDeleteTimestamp = now
+        isDeleteKeyCurrentlyPressed = true
     }
 
     private fun stopContinuousDeleteBridge() {
+        isDeleteKeyCurrentlyPressed = false
         activeBridgeRunnable?.let { mainHandler.removeCallbacks(it) }
         activeBridgeRunnable = null
         lastDeleteTimestamp = 0L
@@ -64,7 +67,7 @@ class BlockNoteAdapter(
 
     private fun checkAndBridgeContinuousDelete(targetPos: Int, startOffset: Int) {
         val now = System.currentTimeMillis()
-        val isUserHoldingDelete = (now - lastDeleteTimestamp) <= 180L
+        val isUserHoldingDelete = isDeleteKeyCurrentlyPressed || (now - lastDeleteTimestamp) <= 250L
 
         if (isUserHoldingDelete && targetPos in blocks.indices && startOffset > 0) {
             activeBridgeRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -75,9 +78,7 @@ class BlockNoteAdapter(
             val runnable = object : Runnable {
                 override fun run() {
                     val currentNow = System.currentTimeMillis()
-                    // CRITICAL FIX 1: DO NOT UPDATE lastDeleteTimestamp HERE!
-                    // Check if real hardware/keyboard keypresses arrived within 180ms
-                    if ((currentNow - lastDeleteTimestamp) <= 180L && targetPos in blocks.indices) {
+                    if (isDeleteKeyCurrentlyPressed && (currentNow - lastDeleteTimestamp) <= 400L && targetPos in blocks.indices) {
                         val block = blocks[targetPos]
                         val vh = attachedRecyclerView?.findViewHolderForAdapterPosition(targetPos) as? BlockViewHolder
                         if (vh != null && vh.editText.selectionStart > 0) {
