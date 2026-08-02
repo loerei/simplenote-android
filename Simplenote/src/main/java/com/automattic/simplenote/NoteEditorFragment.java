@@ -1986,7 +1986,10 @@ public class NoteEditorFragment extends Fragment implements Bucket.Listener<Note
         }
 
         if (PrefUtils.getBoolPref(getActivity(), PrefUtils.PREF_DETECT_LINKS)) {
+            long t0 = System.nanoTime();
             SimplenoteLinkify.addLinks(mContentEditText, Linkify.ALL);
+            long durMs = (long) ((System.nanoTime() - t0) / 1_000_000.0);
+            android.util.Log.d("SIMPLENOTE_PERF_LINKIFY", "[linkifyEditorContent] Linkify.addLinks finished in " + durMs + " ms on Thread=" + Thread.currentThread().getName());
         }
     }
 
