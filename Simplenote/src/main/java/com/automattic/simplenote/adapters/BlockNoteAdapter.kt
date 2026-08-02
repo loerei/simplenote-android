@@ -39,9 +39,10 @@ class BlockNoteAdapter(
 
     var attachedRecyclerView: RecyclerView? = null
 
-    // DYNAMIC ACCELERATION VELOCITY TRACKER FOR CROSS-BLOCK CONTINUOUS DELETE
+    // DYNAMIC ACCELERATION & CHUNK SIZE TRACKER FOR CROSS-BLOCK CONTINUOUS DELETE
     var lastDeleteTimestamp: Long = 0L
     var lastMeasuredDeleteIntervalMs: Long = 54L
+    var lastDeleteChunkSize: Int = 1
     private var activeBridgeRunnable: Runnable? = null
 
     private fun updateDeleteVelocityTracker() {
@@ -55,6 +56,12 @@ class BlockNoteAdapter(
         lastDeleteTimestamp = now
     }
 
+    private fun stopContinuousDeleteBridge() {
+        activeBridgeRunnable?.let { mainHandler.removeCallbacks(it) }
+        activeBridgeRunnable = null
+        lastDeleteTimestamp = 0L
+    }
+
     private fun checkAndBridgeContinuousDelete(targetPos: Int, startOffset: Int) {
         val now = System.currentTimeMillis()
         val isUserHoldingDelete = (now - lastDeleteTimestamp) <= 180L
@@ -62,27 +69,33 @@ class BlockNoteAdapter(
         if (isUserHoldingDelete && targetPos in blocks.indices && startOffset > 0) {
             activeBridgeRunnable?.let { mainHandler.removeCallbacks(it) }
             val interval = lastMeasuredDeleteIntervalMs.coerceIn(25L, 100L)
-            Log.d(TAG_CURSOR, "[CONTINUOUS_DELETE_BRIDGE] Triggered for Pos: $targetPos | StartOffset: $startOffset | MeasuredInterval: ${interval}ms")
+            val chunkSize = lastDeleteChunkSize.coerceIn(1, 10)
+            Log.d(TAG_CURSOR, "[CONTINUOUS_DELETE_BRIDGE] Triggered for Pos: $targetPos | StartOffset: $startOffset | Interval: ${interval}ms | ChunkSize: $chunkSize")
 
             val runnable = object : Runnable {
                 override fun run() {
                     val currentNow = System.currentTimeMillis()
-                    if ((currentNow - lastDeleteTimestamp) <= 250L && targetPos in blocks.indices) {
+                    // CRITICAL FIX 1: DO NOT UPDATE lastDeleteTimestamp HERE!
+                    // Check if real hardware/keyboard keypresses arrived within 180ms
+                    if ((currentNow - lastDeleteTimestamp) <= 180L && targetPos in blocks.indices) {
                         val block = blocks[targetPos]
                         val vh = attachedRecyclerView?.findViewHolderForAdapterPosition(targetPos) as? BlockViewHolder
                         if (vh != null && vh.editText.selectionStart > 0) {
                             val currentSel = vh.editText.selectionStart
                             val editable = vh.editText.text
                             if (editable != null && currentSel <= editable.length && currentSel > 0) {
-                                editable.delete(currentSel - 1, currentSel)
+                                val deleteLen = chunkSize.coerceAtMost(currentSel)
+                                editable.delete(currentSel - deleteLen, currentSel)
                                 block.content = editable.toString()
                                 block.baseContent = block.content
-                                vh.editText.setSelection(currentSel - 1)
-                                lastDeleteTimestamp = System.currentTimeMillis()
-                                Log.d(TAG_CURSOR, "[CONTINUOUS_DELETE_BRIDGE] Bridged 1 char delete at Pos: $targetPos | NewOffset: ${currentSel - 1}")
+                                vh.editText.setSelection(currentSel - deleteLen)
+                                Log.d(TAG_CURSOR, "[CONTINUOUS_DELETE_BRIDGE] Bridged $deleteLen char delete at Pos: $targetPos | NewOffset: ${currentSel - deleteLen}")
                                 mainHandler.postDelayed(this, interval)
                             }
                         }
+                    } else {
+                        Log.d(TAG_CURSOR, "[CONTINUOUS_DELETE_BRIDGE] Auto-stopped (User released key or timeout)")
+                        stopContinuousDeleteBridge()
                     }
                 }
             }
@@ -199,6 +212,11 @@ class BlockNoteAdapter(
                     val currentBlock = blocks[currentPos]
                     val newText = s?.toString() ?: ""
 
+                    // TRACK ACCELERATED DELETION CHUNK SIZE
+                    if (before > 0 && count == 0) {
+                        lastDeleteChunkSize = before
+                    }
+
                     if (currentBlock.content != newText) {
                         val t0 = System.nanoTime()
                         if (newText.contains('\n')) {
@@ -291,6 +309,8 @@ class BlockNoteAdapter(
                 if (keyCode == KeyEvent.KEYCODE_DEL) {
                     if (event.action == KeyEvent.ACTION_DOWN) {
                         updateDeleteVelocityTracker()
+                    } else if (event.action == KeyEvent.ACTION_UP) {
+                        stopContinuousDeleteBridge()
                     }
                     val selectionStart = editText.selectionStart
                     val selectionEnd = editText.selectionEnd
