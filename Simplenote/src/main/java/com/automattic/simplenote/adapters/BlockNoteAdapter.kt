@@ -43,6 +43,7 @@ class BlockNoteAdapter(
     var isDeleteKeyCurrentlyPressed: Boolean = false
     var lastDeleteTimestamp: Long = 0L
     var deleteHoldStartTimestamp: Long = 0L
+    var lastMergeTimestamp: Long = 0L
     var lastMeasuredDeleteIntervalMs: Long = 54L
     var lastDeleteChunkSize: Int = 1
     private var activeBridgeRunnable: Runnable? = null
@@ -69,6 +70,12 @@ class BlockNoteAdapter(
 
     private fun stopContinuousDeleteBridge(pos: Int = -1, selectionStart: Int = -1) {
         val now = System.currentTimeMillis()
+        // Ignore synthetic ACTION_UP sent by Android IME within 150ms of a block merge!
+        if (lastMergeTimestamp > 0L && (now - lastMergeTimestamp) <= 150L) {
+            Log.d(TAG_CURSOR, "[DELETE_SESSION] Ignored synthetic IME ACTION_UP (+${now - lastMergeTimestamp}ms after merge)")
+            return
+        }
+
         if (deleteHoldStartTimestamp > 0L) {
             val elapsedSec = (now - deleteHoldStartTimestamp) / 1000.0
             Log.d(TAG_CURSOR, "[DELETE_SESSION] Thả (+${String.format("%.3f", elapsedSec)}s) | Pos: $pos | SelStart: $selectionStart")
@@ -437,6 +444,7 @@ class BlockNoteAdapter(
         if (pos <= 0 || pos !in blocks.indices) return
         val prevBlock = blocks[pos - 1]
         val currentBlock = blocks[pos]
+        lastMergeTimestamp = System.currentTimeMillis()
 
         if (!prevBlock.hasTrailingNewline) {
             if (prevBlock.content.isNotEmpty()) {
