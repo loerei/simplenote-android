@@ -357,10 +357,10 @@ class BlockNoteAdapter(
             return
         }
 
-        // Fast-path: When deleting an empty block while the preceding block is ALSO an empty line, collapse directly!
-        if (currentBlock.content.isEmpty() && prevBlock.content.isEmpty() && pos > 1) {
-            blocks.removeAt(pos)
-            safeNotifyItemRemoved(pos)
+        // Fast-path: When deleting at start of a block while the preceding block is an empty line, remove empty line and merge with line above!
+        if (prevBlock.content.isEmpty() && pos > 1) {
+            blocks.removeAt(pos - 1)
+            safeNotifyItemRemoved(pos - 1)
             handleBackspaceAtStart(pos - 1)
             return
         }
