@@ -1,5 +1,7 @@
 package com.automattic.simplenote.adapters
 
+import android.os.Handler
+import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.Log
@@ -16,6 +18,8 @@ import com.automattic.simplenote.widgets.CrossBlockSelectionManager
 object BlockEditorConfig {
     const val SYNC_DEBOUNCE_MS = 300L
     const val MAX_BLOCK_LENGTH = 4000
+    const val UI_CHUNK_BATCH_SIZE = 50
+    const val UI_FRAME_DELAY_MS = 16L
 }
 
 class BlockNoteAdapter(
@@ -30,6 +34,7 @@ class BlockNoteAdapter(
     var activeFocusedBlockId: String? = null
     var pendingFocusCursorOffset: Int? = null
     var selectionManager: CrossBlockSelectionManager? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
         super.onAttachedToRecyclerView(recyclerView)
@@ -78,6 +83,27 @@ class BlockNoteAdapter(
         safeNotifyItemChanged(targetPosition)
         val durationMs = (System.nanoTime() - t0) / 1_000_000.0
         Log.d(TAG, "[focusBlock] Thread: ${Thread.currentThread().name} | OldPos: $oldPos -> TargetPos: $targetPosition | CursorOffset: $cursorOffset | Duration: ${String.format("%.3f", durationMs)} ms")
+    }
+
+    private fun notifyBatchItemRangeInserted(startPosition: Int, totalInserted: Int, chunkSize: Int = BlockEditorConfig.UI_CHUNK_BATCH_SIZE) {
+        val initialBatchSize = chunkSize.coerceAtMost(totalInserted)
+        safeNotifyItemRangeInserted(startPosition, initialBatchSize)
+
+        if (totalInserted > initialBatchSize) {
+            var currentOffset = initialBatchSize
+
+            fun scheduleNextBatch() {
+                mainHandler.postDelayed({
+                    if (currentOffset < totalInserted) {
+                        val count = chunkSize.coerceAtMost(totalInserted - currentOffset)
+                        safeNotifyItemRangeInserted(startPosition + currentOffset, count)
+                        currentOffset += count
+                        scheduleNextBatch()
+                    }
+                }, BlockEditorConfig.UI_FRAME_DELAY_MS)
+            }
+            scheduleNextBatch()
+        }
     }
 
     inner class BlockViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
@@ -147,7 +173,7 @@ class BlockNoteAdapter(
                             }
                             safeNotifyItemChanged(currentPos)
                             if (insertedCount > 0) {
-                                safeNotifyItemRangeInserted(currentPos + 1, insertedCount)
+                                notifyBatchItemRangeInserted(currentPos + 1, insertedCount)
                             }
 
                             val lastBlockIndex = currentPos + insertedCount
@@ -155,7 +181,7 @@ class BlockNoteAdapter(
                             focusBlock(lastBlockIndex, lastOffset)
 
                             val durationMs = (System.nanoTime() - t0) / 1_000_000.0
-                            Log.d(TAG, "[onTextChanged] MULTILINE PASTE | Lines: ${lines.size} | InsertedBlocks: $insertedCount | Duration: ${String.format("%.3f", durationMs)} ms")
+                            Log.d(TAG, "[onTextChanged] MULTILINE PASTE CHUNKED | Lines: ${lines.size} | InsertedBlocks: $insertedCount | Duration: ${String.format("%.3f", durationMs)} ms")
 
                             notifyContentChanged()
                             return
