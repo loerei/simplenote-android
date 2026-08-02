@@ -342,6 +342,7 @@ class BlockNoteAdapter(
     }
 
     fun handleBackspaceAtStart(pos: Int) {
+        if (pos <= 0 || pos !in blocks.indices) return
         val prevBlock = blocks[pos - 1]
         val currentBlock = blocks[pos]
 
@@ -353,6 +354,14 @@ class BlockNoteAdapter(
                 focusBlock(pos - 1, prevBlock.content.length)
                 notifyContentChanged()
             }
+            return
+        }
+
+        // Fast-path: When deleting an empty block while the preceding block is ALSO an empty line, collapse directly!
+        if (currentBlock.content.isEmpty() && prevBlock.content.isEmpty() && pos > 1) {
+            blocks.removeAt(pos)
+            safeNotifyItemRemoved(pos)
+            handleBackspaceAtStart(pos - 1)
             return
         }
 
